@@ -1,0 +1,13 @@
+{
+  "name": "transcriber-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "main": "dist/main.js",             
+  "type": "commonjs",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js && esbuild src/preload.ts --bundle --platform=node --external:electron --outfile=dist/preload.js && esbuild src/renderer/app.ts --bundle --platform=browser --outfile=dist/app.js && node scripts/copy-watch.js",
+    "dev": "concurrently -k -n MAIN,PRELOAD,RENDERER,ASSETS,ELEC \"esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js --watch\" \"esbuild src/preload.ts --bundle --platform=node --external:electron --outfile=dist/preload.js --watch\" \"esbuild src/renderer/app.ts --bundle --platform=browser --outfile=dist/app.js --watch\" \"node scripts/copy-watch.js\" \"wait-on dist/main.js dist/preload.js dist/app.js dist/index.html && electron .\"",
+    "start": "electron .",
+    "clean": "rimraf dist"
+  }
+}

@@ -1,0 +1,28 @@
+# --- Core web framework ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sse-starlette==2.1.0
+
+# --- Settings / config ---
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.6.0
+
+# --- Database (MySQL) ---
+mysql-connector-python==9.0.0
+
+# --- Audio / ASR ---
+faster-whisper==1.0.2
+# Optional: only if you explicitly need to run ffmpeg from Python (not required for faster-whisper)
+# ffmpeg-python==0.2.0
+
+langgraph==0.6.7
+
+# --- LLM clients ---
+openai==1.42.0
+# If you won’t use Anthropic, you can omit this:
+anthropic==0.34.0
+
+# --- Utilities ---
+requests==2.32.3
+httpx==0.27.0
