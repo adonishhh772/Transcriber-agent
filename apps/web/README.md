@@ -113,6 +113,8 @@ The repository ships a workflow at `.github/workflows/deploy-web.yml` that build
 2. Under **Build and deployment → Source**, choose **GitHub Actions**.
 3. Open the **Actions** tab → **Deploy web app to GitHub Pages** → **Run workflow** (branch `main`).
 
+The site is live at **https://adonishhh772.github.io/Transcriber-agent/** (Pages `status: built`, HTTPS enforced). Verified after deploy: no failed requests, styles applied, navigation working, and `isSecureContext` with Web Crypto available so the key vault works.
+
 The first run after pushing fails at the _Configure Pages_ step while Pages is still disabled — that is expected. Enable Pages as above, then re-run the workflow (or push another commit to `apps/web/**`).
 
 The site appears at `https://<owner>.github.io/<repo>/`, e.g. `https://adonishhh772.github.io/Transcriber-agent/`. Every later push to `main` that touches `apps/web/**` redeploys automatically.
