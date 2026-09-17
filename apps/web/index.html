@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f5f0" />
+    <meta name="color-scheme" content="light" />
+    <title>Gather · Meeting notes</title>
+    <!--
+      Critical styles are inlined so the first paint is already correct: the
+      shell must never flash every view at once while the full stylesheet is
+      still loading. The stylesheet itself is linked (not imported from JS) for
+      the same reason.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #f7f5f0;
+        color: #26241f;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+          "Segoe UI", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .icon-sprite {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+      }
+      .icon {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+      }
+    </style>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body data-view="library" data-meeting-state="idle">
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+      <symbol
+        id="i-mic"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <rect x="9" y="2.5" width="6" height="10.5" rx="3" />
+        <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" />
+        <path d="M12 18v3.5" />
+      </symbol>
+      <symbol
+        id="i-pause"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M9.5 5.5v13" />
+        <path d="M14.5 5.5v13" />
+      </symbol>
+      <symbol
+        id="i-play"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M8 5.5 19 12 8 18.5z" />
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+        <rect x="6.5" y="6.5" width="11" height="11" rx="2.5" />
+      </symbol>
+      <symbol
+        id="i-plus"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      >
+        <path d="M12 5.5v13M5.5 12h13" />
+      </symbol>
+      <symbol
+        id="i-search"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      >
+        <circle cx="11" cy="11" r="6" />
+        <path d="M15.5 15.5 19.5 19.5" />
+      </symbol>
+      <symbol
+        id="i-list"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      >
+        <path d="M4 7.5h16M4 12h16M4 16.5h9" />
+      </symbol>
+      <symbol
+        id="i-sliders"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      >
+        <path d="M4 8h8M17 8h3M4 16h3M12 16h8" />
+        <circle cx="14.5" cy="8" r="2.2" />
+        <circle cx="9.5" cy="16" r="2.2" />
+      </symbol>
+      <symbol
+        id="i-shield"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path
+          d="M12 3.2 18.8 6v5.2c0 4.3-2.9 7.4-6.8 8.7-3.9-1.3-6.8-4.4-6.8-8.7V6z"
+        />
+        <path d="M9.2 12.1 11.3 14 15 10" />
+      </symbol>
+      <symbol
+        id="i-spark"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+      >
+        <path
+          d="M12 3.5 13.7 9 19 10.7 13.7 12.4 12 17.9 10.3 12.4 5 10.7 10.3 9z"
+        />
+      </symbol>
+      <symbol
+        id="i-copy"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      >
+        <rect x="9" y="9" width="10.5" height="10.5" rx="2.4" />
+        <path
+          d="M15 6.6A2.6 2.6 0 0 0 12.4 4H6.6A2.6 2.6 0 0 0 4 6.6v5.8A2.6 2.6 0 0 0 6.6 15"
+        />
+      </symbol>
+      <symbol
+        id="i-download"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M12 4v10.5" />
+        <path d="M7.8 10.6 12 14.8l4.2-4.2" />
+        <path d="M5 19h14" />
+      </symbol>
+      <symbol
+        id="i-trash"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M5 7h14" />
+        <path d="M9.5 7V4.8h5V7" />
+        <path d="M7 7l.9 12h8.2L17 7" />
+      </symbol>
+      <symbol
+        id="i-x"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      >
+        <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+      </symbol>
+      <symbol
+        id="i-check"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M5 12.6 9.4 17 19 7" />
+      </symbol>
+      <symbol
+        id="i-chevron"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M6.5 9.5 12 15l5.5-5.5" />
+      </symbol>
+      <symbol
+        id="i-doc"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+      >
+        <path d="M7 3.2h7.2L19 8v12.8H7z" />
+        <path d="M14 3.2V8h5" />
+        <path d="M10 13h6M10 16.6h4" />
+      </symbol>
+      <symbol
+        id="i-activity"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M3.5 12.5h3.6l2.2-5.4 3.2 10 2.3-4.6h5.7" />
+      </symbol>
+      <symbol
+        id="i-volume"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M4.5 10v4h3l4 3.6V6.4L7.5 10z" />
+        <path d="M15 9.6a3.6 3.6 0 0 1 0 4.8" />
+        <path d="M17.4 7a6.6 6.6 0 0 1 0 10" />
+      </symbol>
+      <symbol
+        id="i-help"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+      >
+        <circle cx="12" cy="12" r="8.4" />
+        <path d="M9.8 9.7a2.3 2.3 0 1 1 2.9 2.2c-.6.2-.9.7-.9 1.4" />
+        <circle cx="11.8" cy="16.4" r=".95" fill="currentColor" stroke="none" />
+      </symbol>
+      <symbol
+        id="i-back"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M19 12H5.5" />
+        <path d="M11 6l-6 6 6 6" />
+      </symbol>
+      <symbol
+        id="i-panel"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      >
+        <rect x="3.2" y="4.5" width="17.6" height="15" rx="2.6" />
+        <path d="M15 4.5v15" />
+      </symbol>
+      <symbol
+        id="i-refresh"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" />
+        <path d="M19.8 4.6v5.2h-5.2" />
+      </symbol>
+    </svg>
+
+    <div class="app-frame">
+      <aside class="rail" aria-label="Primary navigation">
+        <div class="rail-head">
+          <span class="rail-mark" aria-hidden="true"></span>
+          <span class="rail-name">Gather</span>
+          <button
+            id="rail-toggle"
+            class="rail-toggle"
+            type="button"
+            aria-label="Collapse navigation"
+            aria-expanded="true"
+          >
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-panel"></use>
+            </svg>
+          </button>
+        </div>
+
+        <button class="rail-new" type="button" data-view="prepare">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>
+          <span>New meeting</span>
+        </button>
+
+        <nav class="rail-nav">
+          <button
+            class="rail-link is-active"
+            type="button"
+            data-view="library"
+            aria-current="page"
+          >
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-list"></use>
+            </svg>
+            <span>Meetings</span>
+          </button>
+          <button class="rail-link" type="button" data-view="settings">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-sliders"></use>
+            </svg>
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        <div class="rail-foot">
+          <svg class="icon" aria-hidden="true">
+            <use href="#i-shield"></use>
+          </svg>
+          <span class="rail-foot-copy">
+            <strong>Private by default</strong>
+            <small id="rail-mode">Local capture · v0.1</small>
+          </span>
+        </div>
+      </aside>
+
+      <main class="app-main">
+        <!-- ── 1. Meeting library ─────────────────────────────────────── -->
+        <section
+          class="view view-library"
+          id="view-library"
+          aria-labelledby="library-title"
+        >
+          <header class="page-head">
+            <div>
+              <p class="kicker">Your notebook</p>
+              <h1 id="library-title">Your meetings</h1>
+              <p class="page-sub">
+                A quiet record of the conversations that move work forward.
+              </p>
+            </div>
+            <button class="btn btn-primary" type="button" data-view="prepare">
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-plus"></use>
+              </svg>
+              New meeting
+            </button>
+          </header>
+
+          <div class="library-bar">
+            <label class="search-field" for="history-search">
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-search"></use>
+              </svg>
+              <input
+                id="history-search"
+                type="search"
+                placeholder="Search meetings"
+                autocomplete="off"
+              />
+            </label>
+            <p class="library-count">
+              <strong id="dashboard-count">0</strong> saved
+              <span class="sep" aria-hidden="true">·</span>
+              Latest: <span id="dashboard-latest">No meetings yet</span>
+            </p>
+          </div>
+
+          <div id="history-list" class="meeting-list" aria-live="polite">
+            <p class="list-placeholder">No saved meetings yet.</p>
+          </div>
+        </section>
+
+        <!-- ── 2. Pre-meeting capture screen ──────────────────────────── -->
+        <section
+          class="view view-prepare hidden"
+          id="view-prepare"
+          aria-labelledby="prepare-heading"
+        >
+          <button class="back-link" type="button" data-view="library">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-back"></use>
+            </svg>
+            Meetings
+          </button>
+
+          <div class="prepare-grid">
+            <div class="prepare-copy">
+              <p class="kicker">Before we begin</p>
+              <h1 id="prepare-heading">Set the room <em>for listening.</em></h1>
+              <p class="page-sub">
+                Gather keeps the transcript close while you stay with the people
+                in the room. Audio is transcribed locally; nothing is uploaded
+                unless you turn on AI notes.
+              </p>
+
+              <div class="field-title">
+                <label for="prepare-title">Meeting title</label>
+                <input
+                  id="prepare-title"
+                  type="text"
+                  value="Untitled meeting"
+                  autocomplete="off"
+                />
+              </div>
+
+              <div class="prepare-actions">
+                <button
+                  id="start-button"
+                  class="btn btn-primary btn-lg"
+                  type="button"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-mic"></use>
+                  </svg>
+                  Start meeting
+                </button>
+                <button id="test-audio" class="btn btn-quiet" type="button">
+                  Test audio
+                </button>
+              </div>
+
+              <section
+                id="alert"
+                class="notice notice-danger hidden"
+                role="alert"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-help"></use>
+                </svg>
+                <span id="error-text"></span>
+              </section>
+
+              <section
+                id="browser-support"
+                class="notice notice-warning hidden"
+                role="status"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-help"></use>
+                </svg>
+                <span
+                  >This browser does not support the required display-audio
+                  capture APIs. Use the latest Chrome or Edge on Windows over
+                  localhost or HTTPS.</span
+                >
+              </section>
+            </div>
+
+            <section class="setup-panel" aria-labelledby="setup-heading">
+              <header class="setup-head">
+                <div>
+                  <p class="kicker">Capture setup</p>
+                  <h2 id="setup-heading">Everything in place</h2>
+                </div>
+                <span class="badge badge-ready">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-shield"></use>
+                  </svg>
+                  Local-first
+                </span>
+              </header>
+
+              <div class="setup-row">
+                <span class="setup-icon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-mic"></use></svg>
+                </span>
+                <span class="setup-label">
+                  <strong>Microphone</strong>
+                  <small>Used for your own voice</small>
+                </span>
+                <strong
+                  id="microphone-permission"
+                  class="setup-state status-value muted"
+                  >unknown</strong
+                >
+              </div>
+
+              <div class="setup-row">
+                <span class="setup-icon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-volume"></use></svg>
+                </span>
+                <span class="setup-label">
+                  <strong>System audio</strong>
+                  <small>Teams, Zoom or browser audio</small>
+                </span>
+                <strong id="system-audio" class="setup-state status-value muted"
+                  >Not received</strong
+                >
+              </div>
+
+              <div class="setup-row">
+                <span class="setup-icon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-doc"></use></svg>
+                </span>
+                <span class="setup-label">
+                  <strong>Display surface</strong>
+                  <small>Share Entire Screen for meeting audio</small>
+                </span>
+                <strong
+                  id="display-surface"
+                  class="setup-state status-value muted"
+                  >Not selected</strong
+                >
+              </div>
+
+              <div class="setup-row">
+                <span class="setup-icon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-activity"></use></svg>
+                </span>
+                <span class="setup-label">
+                  <strong>Whisper model</strong>
+                  <small id="prepare-model"
+                    >Xenova/whisper-tiny.en · local</small
+                  >
+                </span>
+                <span id="backend-choice" class="setup-state">Backend: —</span>
+              </div>
+
+              <div class="setup-row">
+                <span class="setup-icon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-spark"></use></svg>
+                </span>
+                <span class="setup-label">
+                  <strong>AI meeting notes</strong>
+                  <small>Optional — add a provider key in Settings</small>
+                </span>
+                <button
+                  id="deepseek-state"
+                  class="setup-state setup-action"
+                  type="button"
+                  data-view="settings"
+                  title="Open AI notes settings"
+                >
+                  Add key
+                </button>
+              </div>
+
+              <p class="setup-note">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-shield"></use>
+                </svg>
+                <span
+                  >Select <strong>Entire Screen</strong> and enable
+                  <strong>Share system audio</strong> to capture Teams or
+                  Zoom.</span
+                >
+              </p>
+
+              <button class="settings-link" type="button" data-view="settings">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-sliders"></use>
+                </svg>
+                Capture, privacy and AI note settings
+              </button>
+            </section>
+          </div>
+        </section>
+
+        <!-- ── Settings ────────────────────────────────────────────────── -->
+        <section
+          class="view view-settings hidden"
+          id="view-settings"
+          aria-labelledby="settings-heading"
+        >
+          <button class="back-link" type="button" data-view="library">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-back"></use>
+            </svg>
+            Meetings
+          </button>
+
+          <header class="settings-head">
+            <p class="kicker">Preferences</p>
+            <h1 id="settings-heading">Settings</h1>
+            <p class="page-sub">
+              Everything here applies to new meetings on this device. Nothing is
+              synced anywhere.
+            </p>
+          </header>
+
+          <div class="settings-stack">
+            <section class="settings-block">
+              <h2>Privacy</h2>
+              <p class="settings-copy">
+                Local-only mode keeps audio, transcription and notes on this
+                device and disables every network request.
+              </p>
+              <label class="switch-row" for="privacy-mode">
+                <span class="switch-copy">
+                  <strong>Local-only mode</strong>
+                  <small>Keep transcription and notes on this device</small>
+                </span>
+                <input id="privacy-mode" type="checkbox" checked />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </label>
+            </section>
+
+            <section class="settings-block">
+              <section
+                class="ai-settings hidden"
+                id="ai-settings"
+                aria-labelledby="ai-settings-heading"
+              >
+                <h2 id="ai-settings-heading">AI notes</h2>
+                <p class="settings-copy">
+                  Optional. Sends finalised transcript text — never audio — to a
+                  provider you choose, and fills in the summary sections. Your
+                  key is used directly from this browser.
+                </p>
+
+                <div class="field-grid">
+                  <label class="field" for="ai-provider">
+                    Provider
+                    <select id="ai-provider"></select>
+                  </label>
+                  <label class="field" for="ai-model">
+                    <span id="ai-model-label">Model</span>
+                    <input
+                      id="ai-model"
+                      list="ai-model-options"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <datalist id="ai-model-options"></datalist>
+                  </label>
+                </div>
+
+                <p class="ai-provider-summary" id="ai-provider-summary"></p>
+
+                <label
+                  class="field hidden"
+                  id="ai-base-url-field"
+                  for="ai-base-url"
+                >
+                  <span id="ai-base-url-label">API base URL</span>
+                  <input
+                    id="ai-base-url"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="https://api.openai.com/v1"
+                  />
+                  <small class="field-hint" id="ai-base-url-hint"></small>
+                </label>
+
+                <div class="field">
+                  <label id="ai-key-label" for="ai-key">API key</label>
+                  <span class="key-row">
+                    <input
+                      id="ai-key"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Paste your key"
+                    />
+                    <button
+                      id="ai-key-toggle"
+                      class="btn btn-quiet btn-compact"
+                      type="button"
+                      aria-pressed="false"
+                    >
+                      Show
+                    </button>
+                  </span>
+                </div>
+
+                <label class="check-row" for="ai-remember">
+                  <input id="ai-remember" type="checkbox" />
+                  <span>
+                    <strong>Remember this key on this device</strong>
+                    <small
+                      >Encrypted with a passphrase you choose. Without this, the
+                      key is kept only for this tab.</small
+                    >
+                  </span>
+                </label>
+
+                <div class="vault hidden" id="ai-vault">
+                  <div class="field">
+                    <label id="ai-vault-label" for="ai-vault-pass"
+                      >Vault passphrase</label
+                    >
+                    <span class="key-row">
+                      <input
+                        id="ai-vault-pass"
+                        type="password"
+                        autocomplete="new-password"
+                        placeholder="At least 8 characters"
+                      />
+                      <button
+                        id="ai-vault-pass-toggle"
+                        class="btn btn-quiet btn-compact"
+                        type="button"
+                        aria-pressed="false"
+                      >
+                        Show
+                      </button>
+                    </span>
+                  </div>
+                  <div class="ai-actions">
+                    <button
+                      id="ai-vault-action"
+                      class="btn btn-primary"
+                      type="button"
+                    >
+                      Save &amp; remember
+                    </button>
+                    <button
+                      id="ai-lock"
+                      class="btn btn-quiet hidden"
+                      type="button"
+                    >
+                      Lock now
+                    </button>
+                    <span
+                      id="ai-vault-status"
+                      class="ai-status"
+                      role="status"
+                      aria-live="polite"
+                    ></span>
+                  </div>
+                </div>
+
+                <div class="ai-actions">
+                  <button id="ai-test" class="btn btn-quiet" type="button">
+                    Test connection
+                  </button>
+                  <button id="ai-forget" class="btn btn-quiet" type="button">
+                    Forget key
+                  </button>
+                  <span
+                    id="ai-status"
+                    class="ai-status"
+                    role="status"
+                    aria-live="polite"
+                  ></span>
+                </div>
+
+                <div id="ai-custom" class="hidden">
+                  <label class="field" for="backend-url">
+                    Server URL
+                    <input
+                      id="backend-url"
+                      value="http://127.0.0.1:8080"
+                      placeholder="http://127.0.0.1:8080"
+                    />
+                  </label>
+                  <label class="field" for="api-token">
+                    Bearer token
+                    <input
+                      id="api-token"
+                      type="password"
+                      placeholder="Only if your server requires one"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+
+                <p class="ai-note ai-note-warning">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-shield"></use>
+                  </svg>
+                  <span
+                    >The key is saved in this browser only and is sent straight
+                    to the provider. Anyone using this browser profile — or any
+                    extension with page access — could read it. Use a key with a
+                    spending limit.</span
+                  >
+                </p>
+                <p class="ai-note">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-activity"></use>
+                  </svg>
+                  <span
+                    >While a meeting runs, notes refresh about every 25 seconds
+                    and once more at the end, so a long meeting makes repeated
+                    requests on your key.</span
+                  >
+                </p>
+
+                <p class="ai-note">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-help"></use>
+                  </svg>
+                  <span
+                    >OpenAI currently blocks direct browser requests, so its
+                    requests fail unless you set an API base URL pointing at a
+                    proxy or gateway. OpenRouter reaches GPT models without
+                    that.</span
+                  >
+                </p>
+              </section>
+              <div class="ai-enable hidden" id="ai-settings-off-note">
+                <h2>AI notes</h2>
+                <p class="settings-copy">
+                  Optional. Turns your transcript into a summary, key points,
+                  decisions, action items and open questions. It needs an API
+                  key from a provider, stored in this browser only.
+                </p>
+                <button id="ai-reveal" class="btn btn-primary" type="button">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-spark"></use>
+                  </svg>
+                  Add an API key
+                </button>
+                <p class="settings-copy muted ai-enable-hint">
+                  Switching this on turns off local-only mode, because the key
+                  sends finalised transcript text to the provider you choose.
+                  Audio and screen video never leave this device.
+                </p>
+              </div>
+            </section>
+
+            <section class="settings-block">
+              <h2>Transcription</h2>
+              <p class="settings-copy">
+                How the browser runs Whisper locally. Larger chunks are more
+                accurate but appear later; overlap re-reads the end of each
+                chunk so words are not lost between them.
+              </p>
+              <details class="advanced" id="settings" open>
+                <summary>
+                  Advanced capture details
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-chevron"></use>
+                  </svg>
+                </summary>
+                <div class="advanced-body">
+                  <label class="field" for="model-input">
+                    Whisper model
+                    <input id="model-input" value="Xenova/whisper-tiny.en" />
+                  </label>
+                  <div class="field-pair">
+                    <label class="field" for="chunk-input">
+                      Chunk (seconds)
+                      <input
+                        id="chunk-input"
+                        type="number"
+                        min="2"
+                        max="30"
+                        step="1"
+                        value="6"
+                      />
+                    </label>
+                    <label class="field" for="overlap-input">
+                      Overlap (seconds)
+                      <input
+                        id="overlap-input"
+                        type="number"
+                        min="0"
+                        max="10"
+                        step="0.5"
+                        value="2"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </details>
+            </section>
+          </div>
+        </section>
+
+        <!-- ── 3 & 4. Live workspace and completed meeting ─────────────── -->
+        <section
+          class="view view-workspace hidden"
+          id="view-workspace"
+          aria-labelledby="document-title"
+        >
+          <header class="workspace-bar">
+            <button class="back-link" type="button" data-view="library">
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-back"></use>
+              </svg>
+              Meetings
+            </button>
+
+            <span id="live-pill" class="live-pill">Ready to test</span>
+
+            <div class="workspace-actions">
+              <button
+                id="start-icon-button"
+                class="btn-icon"
+                type="button"
+                aria-label="Start a new meeting"
+                title="Start a new meeting"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-mic"></use>
+                </svg>
+              </button>
+              <button
+                id="pause-icon-button"
+                class="btn-icon hidden"
+                type="button"
+                aria-label="Pause capture"
+                title="Pause capture"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-pause"></use>
+                </svg>
+              </button>
+              <button
+                id="stop-icon-button"
+                class="btn-icon btn-icon-danger hidden"
+                type="button"
+                aria-label="End meeting"
+                title="End meeting"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-stop"></use>
+                </svg>
+              </button>
+              <button
+                id="panel-toggle"
+                class="btn-icon"
+                type="button"
+                aria-label="Toggle transcript panel"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-panel"></use>
+                </svg>
+              </button>
+              <button id="copy-notes" class="btn btn-quiet" type="button">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-copy"></use>
+                </svg>
+                Copy
+              </button>
+              <button id="export-meeting" class="btn btn-quiet" type="button">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-download"></use>
+                </svg>
+                Export
+              </button>
+              <button
+                id="delete-meeting"
+                class="btn-icon btn-icon-danger"
+                type="button"
+                aria-label="Delete this meeting"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-trash"></use>
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <div class="workspace-grid">
+            <article class="document">
+              <div class="document-meta">
+                <span>Meeting notes</span>
+                <span>
+                  <span id="duration-label">Elapsed</span>
+                  <strong id="duration">00:00</strong>
+                </span>
+              </div>
+
+              <input
+                id="meeting-title"
+                class="document-title"
+                value="Untitled meeting"
+                aria-label="Meeting title"
+                autocomplete="off"
+              />
+
+              <div class="document-rule"></div>
+
+              <div class="note-group note-group-personal">
+                <p class="section-label">
+                  <span class="personal-mark" aria-hidden="true"></span>
+                  Personal notes
+                </p>
+                <textarea
+                  id="manual-notes"
+                  class="personal-notes"
+                  placeholder="Write what you notice, remember, or want to return to…"
+                ></textarea>
+              </div>
+
+              <div class="note-group note-group-ai">
+                <div class="ai-head">
+                  <p class="section-label">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#i-spark"></use>
+                    </svg>
+                    Gather notes
+                  </p>
+                  <span id="finalise-state" class="muted-note"
+                    >Listening quietly</span
+                  >
+                </div>
+
+                <div id="finalise" class="finalise hidden" aria-hidden="true">
+                  <div class="finalise-head">
+                    <span class="spinner" aria-hidden="true"></span>
+                    <span>Finalising notes…</span>
+                  </div>
+                  <div class="finalise-bar"><span></span></div>
+                </div>
+
+                <section
+                  id="finalise-error"
+                  class="notice notice-danger hidden"
+                  role="alert"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-help"></use>
+                  </svg>
+                  <span id="finalise-error-text"></span>
+                  <button id="retry-notes" class="btn btn-quiet" type="button">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#i-refresh"></use>
+                    </svg>
+                    Retry
+                  </button>
+                </section>
+
+                <div
+                  class="skeleton hidden"
+                  id="notes-skeleton"
+                  aria-hidden="true"
+                >
+                  <span class="skeleton-line"></span>
+                  <span class="skeleton-line w-80"></span>
+                  <span class="skeleton-line w-60"></span>
+                </div>
+
+                <section class="note-section">
+                  <h3>Summary</h3>
+                  <textarea
+                    id="note-summary"
+                    rows="2"
+                    placeholder="A concise summary appears here as the conversation unfolds."
+                  ></textarea>
+                </section>
+                <section class="note-section">
+                  <h3>Key points</h3>
+                  <textarea
+                    id="note-key-points"
+                    rows="3"
+                    placeholder="The moments that changed the direction of the work."
+                  ></textarea>
+                </section>
+                <section class="note-section">
+                  <h3>Decisions</h3>
+                  <textarea
+                    id="note-decisions"
+                    rows="2"
+                    placeholder="What the room agreed to."
+                  ></textarea>
+                </section>
+                <section class="note-section">
+                  <h3>Action items</h3>
+                  <textarea
+                    id="note-action-items"
+                    rows="2"
+                    placeholder="Who is doing what next."
+                  ></textarea>
+                </section>
+                <section class="note-section">
+                  <h3>Open questions</h3>
+                  <textarea
+                    id="note-questions"
+                    rows="2"
+                    placeholder="What remains unresolved."
+                  ></textarea>
+                </section>
+              </div>
+            </article>
+
+            <aside
+              class="panel"
+              id="panel"
+              aria-labelledby="transcription-state"
+            >
+              <div class="panel-head">
+                <h2 id="transcription-state">Ready when you are</h2>
+                <button
+                  id="panel-close"
+                  class="btn-icon panel-close"
+                  type="button"
+                  aria-label="Close transcript panel"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-x"></use>
+                  </svg>
+                </button>
+              </div>
+
+              <div
+                class="panel-tabs"
+                role="tablist"
+                aria-label="Meeting detail"
+              >
+                <button
+                  id="tab-transcript"
+                  class="panel-tab is-active"
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="panel-transcript"
+                  data-panel="transcript"
+                >
+                  Transcript
+                </button>
+                <button
+                  id="tab-activity"
+                  class="panel-tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="panel-activity"
+                  data-panel="activity"
+                >
+                  AI activity
+                </button>
+              </div>
+
+              <div
+                id="panel-transcript"
+                class="panel-body"
+                role="tabpanel"
+                aria-labelledby="tab-transcript"
+              >
+                <div class="panel-tools">
+                  <label
+                    class="search-field search-field-compact"
+                    for="transcript-search"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#i-search"></use>
+                    </svg>
+                    <input
+                      id="transcript-search"
+                      type="search"
+                      placeholder="Search transcript"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <button
+                    id="transcript-autoscroll"
+                    class="pill-toggle is-on"
+                    type="button"
+                    aria-pressed="true"
+                    title="Follow new transcript segments"
+                  >
+                    Auto-scroll
+                  </button>
+                  <button
+                    id="transcript-copy"
+                    class="btn-icon"
+                    type="button"
+                    aria-label="Copy transcript"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#i-copy"></use>
+                    </svg>
+                  </button>
+                </div>
+                <div class="transcript-list">
+                  <div
+                    id="transcript-output"
+                    class="transcript-output"
+                    aria-live="polite"
+                  >
+                    Your conversation will appear here once capture starts.
+                  </div>
+                </div>
+              </div>
+
+              <div
+                id="panel-activity"
+                class="panel-body hidden"
+                role="tabpanel"
+                aria-labelledby="tab-activity"
+              >
+                <div id="ai-output" class="ai-output">
+                  AI notes will appear here when privacy mode is disabled and
+                  DeepSeek is available.
+                </div>
+
+                <dl class="stat-list">
+                  <div>
+                    <dt>Model</dt>
+                    <dd id="model-status">—</dd>
+                  </div>
+                  <div>
+                    <dt>Download</dt>
+                    <dd id="model-progress">0%</dd>
+                  </div>
+                  <div>
+                    <dt>Lag</dt>
+                    <dd id="transcription-lag">—</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div class="panel-levels">
+                <p class="section-label">Levels</p>
+                <div class="meter-row">
+                  <div class="meter-label">
+                    <span>Microphone</span
+                    ><strong id="microphone-meter-value">0%</strong>
+                  </div>
+                  <div class="meter-track">
+                    <span
+                      id="microphone-meter"
+                      class="meter-fill accent"
+                    ></span>
+                  </div>
+                </div>
+                <div class="meter-row">
+                  <div class="meter-label">
+                    <span>System audio</span
+                    ><strong id="system-meter-value">0%</strong>
+                  </div>
+                  <div class="meter-track">
+                    <span id="system-meter" class="meter-fill success"></span>
+                  </div>
+                </div>
+                <div class="meter-row meter-row-mixed">
+                  <div class="meter-label">
+                    <span>Mixed</span><strong id="mixed-meter-value">0%</strong>
+                  </div>
+                  <div class="meter-track">
+                    <span id="mixed-meter" class="meter-fill muted"></span>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="live-controls hidden" id="live-controls">
+            <span class="live-status">
+              <span class="dot" aria-hidden="true"></span>
+              <span class="live-label" id="live-label">Recording</span>
+              <span class="live-time" id="float-duration">00:00</span>
+            </span>
+            <span
+              class="ctl-levels"
+              aria-hidden="true"
+              title="Microphone and system audio levels"
+            >
+              <span class="ctl-level">
+                <svg class="icon"><use href="#i-mic"></use></svg>
+                <span class="ctl-level-bar"><i id="float-mic"></i></span>
+              </span>
+              <span class="ctl-level">
+                <svg class="icon"><use href="#i-volume"></use></svg>
+                <span class="ctl-level-bar"><i id="float-system"></i></span>
+              </span>
+            </span>
+            <span class="live-sep" aria-hidden="true"></span>
+            <button
+              id="pause-button"
+              class="btn btn-quiet hidden"
+              type="button"
+            >
+              Pause
+            </button>
+            <button id="stop-button" class="btn btn-end hidden" type="button">
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-stop"></use>
+              </svg>
+              End meeting
+            </button>
+          </div>
+
+          <div id="end-dialog" class="dialog-backdrop hidden">
+            <section
+              class="dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="end-dialog-title"
+              aria-describedby="end-dialog-copy"
+            >
+              <button
+                id="end-dialog-close"
+                class="btn-icon dialog-close"
+                type="button"
+                aria-label="Close"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-x"></use>
+                </svg>
+              </button>
+              <span class="dialog-icon" aria-hidden="true">
+                <svg class="icon"><use href="#i-stop"></use></svg>
+              </span>
+              <p class="kicker">Ready to wrap?</p>
+              <h2 id="end-dialog-title">End this meeting?</h2>
+              <p id="end-dialog-copy">
+                Transcription will stop and Gather will prepare the final notes.
+                Your local transcript is kept even if AI notes are unavailable.
+              </p>
+              <div class="dialog-actions">
+                <button id="cancel-end" class="btn btn-quiet" type="button">
+                  Keep recording
+                </button>
+                <button id="confirm-end" class="btn btn-primary" type="button">
+                  End meeting
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
