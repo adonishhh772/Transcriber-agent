@@ -447,16 +447,28 @@
                   id="start-button"
                   class="btn btn-primary btn-lg"
                   type="button"
+                  disabled
                 >
                   <svg class="icon" aria-hidden="true">
                     <use href="#i-mic"></use>
                   </svg>
-                  Start meeting
+                  <span id="start-label">Start meeting</span>
                 </button>
                 <button id="test-audio" class="btn btn-quiet" type="button">
                   Test audio
                 </button>
+                <button
+                  id="model-reload"
+                  class="btn btn-quiet hidden"
+                  type="button"
+                >
+                  Reload model
+                </button>
               </div>
+
+              <p class="field-hint" id="model-hint" role="status">
+                Whisper will load before the meeting starts.
+              </p>
 
               <section
                 id="alert"

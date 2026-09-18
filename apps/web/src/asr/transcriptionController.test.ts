@@ -5,22 +5,23 @@
  * around it — buffer bookkeeping, window coverage, timestamp offsets and the
  * backpressure behaviour — without a browser, a worker or a model.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { CaptureStreams } from "../capture/browserCapture";
 import type { TranscriptSegment } from "../transcript/dedup";
 import { TranscriptionController } from "./transcriptionController";
+import type { WhisperClient } from "./whisperClient";
 
 type Call = { startMs: number; endMs: number; samples: number };
 
-const state = vi.hoisted(() => ({
+const state = {
   calls: [] as Call[],
   releases: [] as Array<() => void>,
-}));
+};
 
-vi.mock("./whisperClient", () => ({
-  WhisperClient: class {
-    constructor(_options: unknown) {}
-    async load(): Promise<void> {}
+/** Stub for the injected client: the controller no longer builds its own. */
+function fakeClient(): WhisperClient {
+  return {
+    async load(): Promise<void> {},
     transcribe(samples: Float32Array, startMs: number, endMs: number) {
       state.calls.push({ startMs, endMs, samples: samples.length });
       return new Promise((resolve) => {
@@ -28,10 +29,10 @@ vi.mock("./whisperClient", () => ({
           resolve({ text: `window ${startMs} ${endMs}`, startMs, endMs }),
         );
       });
-    }
-    dispose(): void {}
-  },
-}));
+    },
+    dispose(): void {},
+  } as unknown as WhisperClient;
+}
 
 const BLOCK = 4096;
 const SR = 16_000;
@@ -70,12 +71,11 @@ function setup() {
     },
     {
       onState: () => {},
-      onProgress: () => {},
-      onBackend: () => {},
       onSegment: (segment) => void segments.push(segment),
       onLag: () => {},
       onError: (message) => void errors.push(message),
     },
+    fakeClient(),
   );
 
   return {

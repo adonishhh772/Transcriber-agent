@@ -8,6 +8,7 @@ import {
   stopCapture,
 } from "./capture/browserCapture";
 import { TranscriptionController } from "./asr/transcriptionController";
+import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
 import {
@@ -78,6 +79,9 @@ const stateElement = $("transcription-state");
 const backendElement = $("backend-choice");
 const modelStatus = $("model-status");
 const modelProgress = $("model-progress");
+const modelHint = $("model-hint");
+const modelReload = $("model-reload") as HTMLButtonElement;
+const startLabel = $("start-label");
 const transcriptionLag = $("transcription-lag");
 const transcriptOutput = $("transcript-output");
 const aiOutput = $("ai-output");
@@ -211,6 +215,134 @@ let intelligenceTimer: number | null = null;
 let meetingTitle = "Untitled meeting";
 let recovering = false;
 
+/* ---- Whisper model lifecycle -------------------------------------------
+   The model is loaded once, up front, and its worker is kept warm: pressing
+   Start never waits for a download, and Start stays disabled until the model
+   is actually ready. */
+type ModelState = "idle" | "loading" | "ready" | "error";
+
+const DEFAULT_WHISPER_MODEL = "Xenova/whisper-tiny.en";
+
+let whisperClient: WhisperClient | null = null;
+let whisperModelId = "";
+let whisperLoad: Promise<WhisperClient | null> | null = null;
+let modelState: ModelState = "idle";
+let modelError = "";
+let modelPercent = 0;
+let modelReloadTimer: number | null = null;
+
+function activeModelId(): string {
+  return modelInput.value.trim() || DEFAULT_WHISPER_MODEL;
+}
+
+function handleBackend(backend: "webgpu" | "wasm"): void {
+  backendElement.textContent = `Backend: ${backend.toUpperCase()}`;
+  backendHint.textContent =
+    backend === "webgpu"
+      ? "WebGPU is active — Whisper runs on your GPU."
+      : "No WebGPU adapter, so Chrome runs Whisper single-threaded on the CPU (GitHub Pages cannot turn on WebAssembly threads). Updates take a few seconds; the app widens its window to keep up.";
+}
+
+/** Loads the model once and reuses it; `reload` discards a broken one. */
+async function ensureWhisperModel(
+  reload = false,
+): Promise<WhisperClient | null> {
+  const model = activeModelId();
+  if (reload) {
+    whisperLoad = null;
+    whisperClient?.dispose();
+    whisperClient = null;
+    modelState = "idle";
+  }
+  if (whisperClient && whisperModelId === model && modelState === "ready")
+    return whisperClient;
+  if (whisperLoad) return whisperLoad;
+  if (whisperClient && whisperModelId !== model) {
+    whisperClient.dispose();
+    whisperClient = null;
+  }
+  whisperLoad = loadWhisperModel(model).finally(() => {
+    whisperLoad = null;
+  });
+  return whisperLoad;
+}
+
+async function loadWhisperModel(
+  model: string,
+): Promise<WhisperClient | null> {
+  whisperModelId = model;
+  modelState = "loading";
+  modelError = "";
+  modelPercent = 0;
+  syncModelState();
+  const client = new WhisperClient({
+    model,
+    language: "en",
+    onProgress: (progress, status) => {
+      modelPercent = progress;
+      modelStatus.textContent = status;
+      modelProgress.textContent = `${Math.round(progress)}%`;
+      syncModelState();
+    },
+    onBackend: handleBackend,
+    onError: (message) => {
+      modelError = message;
+      modelState = "error";
+      syncModelState();
+    },
+  });
+  try {
+    await client.load();
+    whisperClient = client;
+    modelState = "ready";
+    syncModelState();
+    return client;
+  } catch (error) {
+    client.dispose();
+    whisperClient = null;
+    modelError =
+      error instanceof Error
+        ? error.message
+        : "The Whisper model could not be loaded.";
+    modelState = "error";
+    syncModelState();
+    return null;
+  }
+}
+
+/** Keeps the Start button, the setup row and the hint in one state. */
+function syncModelState(): void {
+  const supported = initialSupport.supported;
+  const state =
+    modelState === "loading"
+      ? `loading ${Math.round(modelPercent)}%`
+      : modelState === "ready"
+        ? "ready"
+        : modelState === "error"
+          ? "not loaded"
+          : "queued";
+  prepareModel.textContent = `${activeModelId()} · ${state}`;
+  startButton.disabled = !supported || modelState !== "ready";
+  if (startIconButton) startIconButton.disabled = modelState !== "ready";
+  modelReload.classList.toggle("hidden", modelState !== "error");
+  if (startLabel)
+    startLabel.textContent =
+      modelState === "loading" ? "Preparing Whisper…" : "Start meeting";
+  if (!supported) {
+    modelHint.textContent =
+      initialSupport.reason ?? "Browser capture is unavailable here.";
+    return;
+  }
+  if (modelState === "loading")
+    modelHint.textContent = `Downloading and preparing the Whisper model — ${Math.round(modelPercent)}%. The meeting starts as soon as it is ready.`;
+  else if (modelState === "ready")
+    modelHint.textContent = "Whisper is loaded and runs entirely in this browser.";
+  else if (modelState === "error")
+    modelHint.textContent = `${modelError} Use “Reload model” to try again.`;
+  else modelHint.textContent = "Whisper will load before the meeting starts.";
+}
+
+
 void queryMicrophonePermission().then((value) => {
   microphonePermission.textContent = value;
 });
@@ -316,7 +448,21 @@ retryNotes.addEventListener("click", () => void finaliseNotes());
 testAudioButton.addEventListener("click", () => void testAudio());
 
 privacyMode.addEventListener("change", syncPrivacyState);
-modelInput.addEventListener("input", syncPrepareModel);
+modelInput.addEventListener("input", () => {
+  /* The chosen model is loaded ahead of the meeting, so a typed-in id starts
+     a fresh load once the user stops typing. */
+  syncPrepareModel();
+  if (modelReloadTimer !== null) window.clearTimeout(modelReloadTimer);
+  modelReloadTimer = window.setTimeout(() => {
+    modelReloadTimer = null;
+    if (capture) return; // a live meeting keeps the model it started with
+    void ensureWhisperModel(true);
+  }, 900);
+});
+modelReload.addEventListener("click", () => {
+  hideError();
+  void ensureWhisperModel(true);
+});
 
 /* ---- AI notes settings ---------------------------------------------- */
 for (const provider of PROVIDERS) {
@@ -473,6 +619,20 @@ syncAiSettingsUi();
 setView("library");
 setMeetingState("idle");
 syncAutoscrollButton();
+/* Load Whisper now rather than after the user has picked a screen: by the
+   time a meeting starts the model is normally already in memory. */
+if (initialSupport.supported) {
+  const preload = () => void ensureWhisperModel();
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (
+      callback: () => void,
+      options?: { timeout: number },
+    ) => number;
+  };
+  if (idleWindow.requestIdleCallback)
+    idleWindow.requestIdleCallback(preload, { timeout: 3000 });
+  else window.setTimeout(preload, 1200);
+}
 window.addEventListener("beforeunload", () => {
   void persistCurrentMeeting();
 });
@@ -527,16 +687,27 @@ async function handleStart(): Promise<void> {
     renderTranscript(
       undefined,
       [],
-      "Loading the English Whisper model locally…",
+      modelState === "ready"
+        ? "Listening for the first words…"
+        : "Loading the English Whisper model locally…",
     );
     liveLabel.textContent = "Recording";
     modelStatus.textContent = modelInput.value;
     lastRollingAt = 0;
     rollingInFlight = false;
     syncAiStatusSummary();
+    /* Capture first so the display prompt keeps its user gesture, then make
+       sure the model is ready. It normally already is. */
+    const client = await ensureWhisperModel();
+    if (!client) {
+      throw new Error(
+        modelError ||
+          "The Whisper model could not be loaded. Use “Reload model” and try again.",
+      );
+    }
     transcription = new TranscriptionController(
       {
-        model: modelInput.value.trim() || "Xenova/whisper-tiny.en",
+        model: activeModelId(),
         chunkDurationMs: clampNumber(chunkInput.value, 2, 30, 6) * 1000,
         overlapMs: clampNumber(overlapInput.value, 0, 10, 2) * 1000,
         silenceRmsThreshold: 0.008,
@@ -550,17 +721,6 @@ async function handleStart(): Promise<void> {
           if (!loading && latestSegments.length === 0)
             stateElement.textContent = value;
         },
-        onProgress: (progress, status) => {
-          modelProgress.textContent = `${Math.round(progress)}%`;
-          modelStatus.textContent = status;
-        },
-        onBackend: (backend) => {
-          backendElement.textContent = `Backend: ${backend.toUpperCase()}`;
-          backendHint.textContent =
-            backend === "webgpu"
-              ? "WebGPU is active — Whisper runs on your GPU."
-              : "No WebGPU adapter, so Chrome runs Whisper single-threaded on the CPU (GitHub Pages cannot turn on WebAssembly threads). Updates take a few seconds; the app widens its window to keep up.";
-        },
         onSegment: (segment, all) => {
           latestSegments = all;
           notesSkeleton.classList.add("hidden");
@@ -573,6 +733,7 @@ async function handleStart(): Promise<void> {
         },
         onError: showError,
       },
+      client,
     );
     await transcription.start(capture);
     notesSkeleton.classList.add("hidden");
@@ -632,7 +793,7 @@ async function handleStart(): Promise<void> {
     setMeetingState("idle");
     setView("prepare");
   } finally {
-    startButton.disabled = !initialSupport.supported;
+    startButton.disabled = !initialSupport.supported || modelState !== "ready";
   }
 }
 
@@ -1176,6 +1337,9 @@ function setView(view: ViewName): void {
   }
   /* Never yank the page to the top unless the view actually changed. */
   if (changed) window.scrollTo(0, 0);
+  /* The prepare screen owns the Start button, so make sure the model is on its
+     way (or already loaded) as soon as it is opened. */
+  if (view === "prepare" && initialSupport.supported) void ensureWhisperModel();
 }
 
 function setMeetingState(state: MeetingState): void {
@@ -1561,9 +1725,7 @@ async function runConnectionTest(): Promise<void> {
 }
 
 function syncPrepareModel(): void {
-  prepareModel.textContent = `${
-    modelInput.value.trim() || "Xenova/whisper-tiny.en"
-  } · local`;
+  syncModelState();
 }
 
 function autoGrowField(field: HTMLTextAreaElement): void {

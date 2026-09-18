@@ -13,6 +13,11 @@ export type WhisperClientOptions = {
   onError?: (message: string) => void;
 };
 
+/** A download that reports nothing for this long is treated as stalled. */
+const LOAD_STALL_MS = 120_000;
+const STALL_MESSAGE =
+  "The Whisper model download stalled. Check your connection, then reload the model.";
+
 export class WhisperClient {
   private readonly worker: Worker;
   private readonly options: WhisperClientOptions;
@@ -22,6 +27,8 @@ export class WhisperClient {
     (segment: TranscriptSegment | null) => void
   >();
   private loadPromise: Promise<void> | null = null;
+  private failLoad: ((error: Error) => void) | null = null;
+  private stallTimer: number | null = null;
   private disposed = false;
 
   constructor(options: WhisperClientOptions) {
@@ -31,55 +38,87 @@ export class WhisperClient {
     });
     this.worker.onmessage = (event: MessageEvent<WhisperWorkerResponse>) =>
       this.handleMessage(event.data);
-    this.worker.onerror = (event) =>
-      this.options.onError?.(event.message || "Whisper worker error");
+    this.worker.onerror = (event) => {
+      /* Without this the load promise would never settle and the UI would sit
+         on "Loading the Whisper model…" forever. */
+      const message = event.message || "Whisper worker error";
+      this.options.onError?.(message);
+      this.failLoad?.(new Error(message));
+    };
   }
 
+  /**
+   * Idempotent: concurrent calls join the first load instead of starting a
+   * second download, and a loaded model is reused.
+   */
   async load(): Promise<void> {
     if (this.disposed) throw new Error("Whisper client disposed");
     if (this.loadPromise) return this.loadPromise;
-    let backend: WhisperBackend = (await supportsWebGpu()) ? "webgpu" : "wasm";
+    /* Assign before the first await: probing the GPU adapter is asynchronous,
+       and two callers would otherwise both start loading. */
+    this.loadPromise = this.detectBackendAndLoad();
+    return this.loadPromise;
+  }
+
+  private async detectBackendAndLoad(): Promise<void> {
+    const backend: WhisperBackend = (await supportsWebGpu())
+      ? "webgpu"
+      : "wasm";
     this.options.onBackend?.(backend);
-    this.loadPromise = new Promise<void>((resolve, reject) => {
-      const listener = (event: MessageEvent<WhisperWorkerResponse>) => {
-        if (event.data.type === "loaded") {
-          this.worker.removeEventListener("message", listener);
-          resolve();
-        } else if (event.data.type === "error") {
-          this.worker.removeEventListener("message", listener);
-          if (backend === "webgpu") {
-            backend = "wasm";
-            this.options.onBackend?.("wasm");
-            const retryListener = (
-              retry: MessageEvent<WhisperWorkerResponse>,
-            ) => {
-              if (retry.data.type === "loaded") {
-                this.worker.removeEventListener("message", retryListener);
-                resolve();
-              } else if (retry.data.type === "error") {
-                this.worker.removeEventListener("message", retryListener);
-                reject(new Error(retry.data.message));
-              }
-            };
-            this.worker.addEventListener("message", retryListener);
-            this.worker.postMessage({
-              type: "load",
-              model: this.options.model,
-              backend,
-            } satisfies WhisperWorkerRequest);
-            return;
-          }
-          reject(new Error(event.data.message));
-        }
+    await this.startLoading(backend);
+  }
+
+  /** Loads once, retrying on WASM when WebGPU cannot initialise. */
+  private startLoading(backend: WhisperBackend): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const settle = () => {
+        this.worker.removeEventListener("message", listener);
+        this.clearStall();
+        this.failLoad = null;
       };
+      const fail = (error: Error) => {
+        settle();
+        reject(error);
+      };
+      const listener = (event: MessageEvent<WhisperWorkerResponse>) => {
+        const message = event.data;
+        if (message.type === "loaded") {
+          settle();
+          resolve();
+          return;
+        }
+        if (message.type === "progress") {
+          this.armStall(() => fail(new Error(STALL_MESSAGE)));
+          return;
+        }
+        if (message.type !== "error") return;
+        if (backend === "webgpu") {
+          this.options.onBackend?.("wasm");
+          settle();
+          this.startLoading("wasm").then(resolve, reject);
+          return;
+        }
+        fail(new Error(message.message));
+      };
+      this.failLoad = fail;
       this.worker.addEventListener("message", listener);
+      this.armStall(() => fail(new Error(STALL_MESSAGE)));
       this.worker.postMessage({
         type: "load",
         model: this.options.model,
         backend,
       } satisfies WhisperWorkerRequest);
     });
-    return this.loadPromise;
+  }
+
+  private armStall(onStall: () => void): void {
+    this.clearStall();
+    this.stallTimer = window.setTimeout(onStall, LOAD_STALL_MS);
+  }
+
+  private clearStall(): void {
+    if (this.stallTimer !== null) window.clearTimeout(this.stallTimer);
+    this.stallTimer = null;
   }
 
   async transcribe(
@@ -114,6 +153,8 @@ export class WhisperClient {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.clearStall();
+    this.failLoad?.(new Error("Whisper client disposed"));
     for (const resolve of this.pending.values()) resolve(null);
     this.pending.clear();
     this.worker.postMessage({ type: "dispose" } satisfies WhisperWorkerRequest);

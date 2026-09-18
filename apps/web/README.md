@@ -6,6 +6,8 @@ Stages 1–2 are local-only Windows Chrome/Edge prototypes. The app asks the use
 
 The default configurable model identifier is `Xenova/whisper-tiny.en`. The worker currently isolates model loading, backend selection, progress reporting, chunk scheduling, and cleanup. The model-runtime adapter is the boundary for wiring the chosen browser Whisper package and quantized model artifacts; no inference request leaves the browser.
 
+The model is loaded **before** a meeting rather than while one starts: the app warms it up as soon as it is idle (and again when the preparation screen opens), keeps the worker alive between meetings, and leaves "Start meeting" disabled until the model reports ready. Failures are explicit — a worker that cannot start, a download that reports no progress for two minutes, or a rejected model id all surface a message with a "Reload model" action instead of leaving the app on "Loading…". Changing the model id in Settings reloads it when the user stops typing.
+
 Recommended company-laptop starting point:
 
 - `Xenova/whisper-tiny.en`: approximately 75–150 MB downloaded depending on quantization/runtime files; typically several hundred MB of working memory.

@@ -6,7 +6,7 @@ import {
   type TranscriptSegment,
 } from "../transcript/dedup";
 import { planChunk, resolveScheduler } from "./chunkScheduler";
-import { WhisperClient } from "./whisperClient";
+import type { WhisperClient } from "./whisperClient";
 
 export type TranscriptionSettings = {
   chunkDurationMs: number;
@@ -18,8 +18,6 @@ export type TranscriptionSettings = {
 
 export type TranscriptionCallbacks = {
   onState: (state: string) => void;
-  onProgress: (progress: number, status: string) => void;
-  onBackend: (backend: "webgpu" | "wasm") => void;
   onSegment: (segment: TranscriptSegment, all: TranscriptSegment[]) => void;
   onLag: (lagMs: number) => void;
   onError: (message: string) => void;
@@ -52,16 +50,12 @@ export class TranscriptionController {
   constructor(
     settings: TranscriptionSettings,
     callbacks: TranscriptionCallbacks,
+    /** Loaded by the caller and kept warm between meetings. */
+    client: WhisperClient,
   ) {
     this.settings = settings;
     this.callbacks = callbacks;
-    this.client = new WhisperClient({
-      model: settings.model,
-      onProgress: callbacks.onProgress,
-      onBackend: callbacks.onBackend,
-      onError: callbacks.onError,
-      language: settings.language,
-    });
+    this.client = client;
     this.scheduler = resolveScheduler({
       sampleRate: TARGET_SAMPLE_RATE,
       chunkMs: settings.chunkDurationMs,
@@ -113,7 +107,8 @@ export class TranscriptionController {
     this.transcribedOnce = false;
     this.preferShortChunk = true;
     this.skippedMs = 0;
-    this.client.dispose();
+    /* The client is owned by the caller: the model stays loaded for the next
+       meeting instead of being rebuilt every time. */
     this.segments = [];
     this.callbacks.onState("Stopped");
   }
