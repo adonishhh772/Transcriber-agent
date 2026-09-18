@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { CaptureStreams } from "../capture/browserCapture";
 import type { TranscriptSegment } from "../transcript/dedup";
 import { TranscriptionController } from "./transcriptionController";
+import type { TranscriptionDiagnostics } from "./transcriptionController";
 import type { WhisperClient } from "./whisperClient";
 
 type Call = { startMs: number; endMs: number; samples: number };
@@ -61,11 +62,13 @@ function setup() {
   };
   const segments: TranscriptSegment[] = [];
   const errors: string[] = [];
+  const diagnostics: TranscriptionDiagnostics[] = [];
   const controller = new TranscriptionController(
     {
       chunkDurationMs: 6000,
       overlapMs: 2000,
-      silenceRmsThreshold: 0.008,
+      /* Matches the app: only true digital silence is skipped. */
+      silenceRmsThreshold: 0.0015,
       model: "test-model",
       language: "en",
     },
@@ -73,6 +76,7 @@ function setup() {
       onState: () => {},
       onSegment: (segment) => void segments.push(segment),
       onLag: () => {},
+      onDiagnostics: (snapshot) => void diagnostics.push(snapshot),
       onError: (message) => void errors.push(message),
     },
     fakeClient(),
@@ -82,6 +86,7 @@ function setup() {
     controller,
     segments,
     errors,
+    diagnostics,
     capture: { audioContext: context, mixed: {} } as unknown as CaptureStreams,
     /** Feeds n blocks of audio, releasing finished inferences as they appear. */
     async pump(blocks: number, amplitude = 0.2, release = true) {
@@ -173,10 +178,10 @@ describe("live transcription", () => {
     expect(latest.startMs).toBeGreaterThan(pushedMs - 7000);
   });
 
-  it("ignores silence without accumulating it, then snaps back to a short window", async () => {
+  it("ignores digital silence without accumulating it, then snaps back to a short window", async () => {
     const harness = setup();
     await harness.controller.start(harness.capture);
-    await harness.pump(78, 0.001); // ~20s of near-silence
+    await harness.pump(78, 0.0002); // ~20s of digital silence
     expect(state.calls).toEqual([]);
 
     await harness.pump(11); // speech resumes
@@ -185,5 +190,31 @@ describe("live transcription", () => {
     expect(first.endMs - first.startMs).toBe(2500);
     expect(first.startMs).toBeGreaterThan(0);
     expect(harness.controller.getSkippedMs()).toBe(0);
+  });
+
+  it("transcribes quiet audio instead of discarding it as silence", async () => {
+    /* 0.004 RMS is quiet meeting audio — a distant microphone or system audio
+       at half volume. The old 0.008 gate dropped every window of it. */
+    const harness = setup();
+    await harness.controller.start(harness.capture);
+    await harness.pump(20, 0.004);
+    expect(state.calls.length).toBeGreaterThan(0);
+  });
+
+  it("reports level counters so a silent input cannot look frozen", async () => {
+    const harness = setup();
+    await harness.controller.start(harness.capture);
+    await harness.pump(40, 0.0002); // ~10s of digital silence
+    expect(harness.diagnostics.length).toBeGreaterThan(0);
+    const latest = harness.diagnostics[harness.diagnostics.length - 1];
+    expect(latest.transcribed).toBe(0);
+    expect(latest.skippedSilent).toBeGreaterThan(0);
+    expect(latest.silentMs).toBeGreaterThan(0);
+    expect(latest.level).toBeLessThan(0.0015);
+
+    await harness.pump(20);
+    const afterSpeech = harness.diagnostics[harness.diagnostics.length - 1];
+    expect(afterSpeech.transcribed).toBeGreaterThan(0);
+    expect(afterSpeech.silentMs).toBe(0);
   });
 });

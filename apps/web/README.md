@@ -8,6 +8,8 @@ The default configurable model identifier is `Xenova/whisper-tiny.en`. The worke
 
 The model is loaded **before** a meeting rather than while one starts: the app warms it up as soon as it is idle (and again when the preparation screen opens), keeps the worker alive between meetings, and leaves "Start meeting" disabled until the model reports ready. Failures are explicit — a worker that cannot start, a download that reports no progress for two minutes, or a rejected model id all surface a message with a "Reload model" action instead of leaving the app on "Loading…". Changing the model id in Settings reloads it when the user stops typing.
 
+Capture is deliberately forgiving and never silently idle. Windows quieter than 0.0015 RMS are skipped to save inference work, and that decision is reported rather than hidden: the AI-activity panel shows the input level and a `transcribed · too quiet` count, meters print a decimal below 1% so a quiet input does not read as a dead `0%`, and two warnings distinguish the failure modes — "no audio is reaching the transcriber" (capture: system audio or microphone) and "audio is heard but the model has returned no words" (model or GPU). Compute is selectable in Settings: `Auto` uses WebGPU when an adapter is available, `CPU only` forces the WASM path when a GPU driver misbehaves.
+
 Recommended company-laptop starting point:
 
 - `Xenova/whisper-tiny.en`: approximately 75–150 MB downloaded depending on quantization/runtime files; typically several hundred MB of working memory.

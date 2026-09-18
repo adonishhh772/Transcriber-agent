@@ -159,6 +159,29 @@ describe("WhisperClient.load", () => {
     await expect(loading).resolves.toBeUndefined();
   });
 
+  it("honours a forced CPU backend without probing the GPU", async () => {
+    vi.stubGlobal("navigator", {
+      gpu: { requestAdapter: async () => ({}) },
+    });
+    const onBackend = vi.fn();
+    const client = new WhisperClient({
+      model: "Xenova/whisper-tiny.en",
+      forceBackend: "wasm",
+      onBackend,
+    });
+    const loading = client.load();
+    await vi.waitFor(() =>
+      expect(lastWorker().posted[0]).toMatchObject({ backend: "wasm" }),
+    );
+    expect(onBackend).toHaveBeenCalledWith("wasm");
+    lastWorker().emit({
+      type: "loaded",
+      model: "Xenova/whisper-tiny.en",
+      backend: "wasm",
+    });
+    await expect(loading).resolves.toBeUndefined();
+  });
+
   it("reuses one load when load() is called repeatedly", async () => {
     const client = new WhisperClient({ model: "Xenova/whisper-tiny.en" });
     const first = client.load();

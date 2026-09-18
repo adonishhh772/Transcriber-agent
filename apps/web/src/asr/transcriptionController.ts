@@ -21,6 +21,17 @@ export type TranscriptionCallbacks = {
   onSegment: (segment: TranscriptSegment, all: TranscriptSegment[]) => void;
   onLag: (lagMs: number) => void;
   onError: (message: string) => void;
+  /** Level/counter feedback, so a quiet or silent input is never invisible. */
+  onDiagnostics?: (snapshot: TranscriptionDiagnostics) => void;
+};
+
+export type TranscriptionDiagnostics = {
+  /** RMS of the most recent window (0 when nothing has been measured yet). */
+  level: number;
+  transcribed: number;
+  skippedSilent: number;
+  /** Consecutive milliseconds skipped as too quiet. */
+  silentMs: number;
 };
 
 /** Safety net so a stalled worker cannot grow the pending buffer forever. */
@@ -43,6 +54,10 @@ export class TranscriptionController {
   private transcribedOnce = false;
   private preferShortChunk = true;
   private skippedMs = 0;
+  private transcribedWindows = 0;
+  private skippedSilentWindows = 0;
+  private silentMs = 0;
+  private lastLevel = 0;
   private segments: TranscriptSegment[] = [];
   private paused = false;
   private stopped = false;
@@ -107,6 +122,10 @@ export class TranscriptionController {
     this.transcribedOnce = false;
     this.preferShortChunk = true;
     this.skippedMs = 0;
+    this.transcribedWindows = 0;
+    this.skippedSilentWindows = 0;
+    this.silentMs = 0;
+    this.lastLevel = 0;
     /* The client is owned by the caller: the model stays loaded for the next
        meeting instead of being rebuilt every time. */
     this.segments = [];
@@ -164,16 +183,28 @@ export class TranscriptionController {
       );
       this.trimTo(plan.nextSample);
 
-      if (rmsLevel(chunk) < this.settings.silenceRmsThreshold) {
-        /* Nothing said: take the next window straight away and keep the short
-           window so speech after the pause is picked up quickly. */
+      const level = rmsLevel(chunk);
+      this.lastLevel = level;
+      if (level < this.settings.silenceRmsThreshold) {
+        /* Nothing audible: take the next window straight away and keep the
+           short window so speech after the pause is picked up quickly. The
+           counters are reported so a permanently quiet input is visible in the
+           UI instead of looking like a frozen transcript. */
         this.preferShortChunk = true;
+        this.skippedSilentWindows += 1;
+        this.silentMs += Math.round(
+          ((plan.endSample - plan.startSample) * 1000) / TARGET_SAMPLE_RATE,
+        );
+        this.emitDiagnostics();
         continue;
       }
 
       this.preferShortChunk = false;
       this.transcribedOnce = true;
+      this.transcribedWindows += 1;
+      this.silentMs = 0;
       this.inFlight += 1;
+      this.emitDiagnostics();
       void this.transcribeChunk(
         chunk,
         Math.round((plan.startSample * 1000) / TARGET_SAMPLE_RATE),
@@ -181,6 +212,15 @@ export class TranscriptionController {
       );
       return;
     }
+  }
+
+  private emitDiagnostics(): void {
+    this.callbacks.onDiagnostics?.({
+      level: this.lastLevel,
+      transcribed: this.transcribedWindows,
+      skippedSilent: this.skippedSilentWindows,
+      silentMs: this.silentMs,
+    });
   }
 
   private async transcribeChunk(

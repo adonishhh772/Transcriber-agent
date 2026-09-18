@@ -909,6 +909,13 @@
                       />
                     </label>
                   </div>
+                  <label class="field" for="backend-mode">
+                    Compute
+                    <select id="backend-mode">
+                      <option value="auto">Auto (GPU when available)</option>
+                      <option value="wasm">CPU only (most compatible)</option>
+                    </select>
+                  </label>
                 </div>
               </details>
             </section>
@@ -1248,6 +1255,14 @@
                   <div>
                     <dt>Lag</dt>
                     <dd id="transcription-lag">—</dd>
+                  </div>
+                  <div>
+                    <dt>Input level</dt>
+                    <dd id="transcription-level">—</dd>
+                  </div>
+                  <div>
+                    <dt>Windows</dt>
+                    <dd id="transcription-windows">—</dd>
                   </div>
                 </dl>
               </div>

@@ -7,7 +7,10 @@ import {
   startCapture,
   stopCapture,
 } from "./capture/browserCapture";
-import { TranscriptionController } from "./asr/transcriptionController";
+import {
+  TranscriptionController,
+  type TranscriptionDiagnostics,
+} from "./asr/transcriptionController";
 import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
@@ -80,9 +83,12 @@ const backendElement = $("backend-choice");
 const modelStatus = $("model-status");
 const modelProgress = $("model-progress");
 const modelHint = $("model-hint");
+const backendMode = $("backend-mode") as HTMLSelectElement;
 const modelReload = $("model-reload") as HTMLButtonElement;
 const startLabel = $("start-label");
 const transcriptionLag = $("transcription-lag");
+const transcriptionLevel = $("transcription-level");
+const transcriptionWindows = $("transcription-windows");
 const transcriptOutput = $("transcript-output");
 const aiOutput = $("ai-output");
 const manualNotes = $("manual-notes") as HTMLTextAreaElement;
@@ -235,6 +241,28 @@ function activeModelId(): string {
   return modelInput.value.trim() || DEFAULT_WHISPER_MODEL;
 }
 
+/**
+ * Compute preference, kept in localStorage because it is a property of the
+ * machine (a GPU driver that produces nothing is a real failure mode).
+ */
+const BACKEND_KEY = "gather.transcription.backend";
+
+function loadBackendMode(): "auto" | "wasm" {
+  try {
+    return localStorage.getItem(BACKEND_KEY) === "wasm" ? "wasm" : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+function saveBackendMode(value: "auto" | "wasm"): void {
+  try {
+    localStorage.setItem(BACKEND_KEY, value);
+  } catch {
+    /* private mode: the preference simply does not persist */
+  }
+}
+
 function handleBackend(backend: "webgpu" | "wasm"): void {
   backendElement.textContent = `Backend: ${backend.toUpperCase()}`;
   backendHint.textContent =
@@ -278,6 +306,7 @@ async function loadWhisperModel(
   const client = new WhisperClient({
     model,
     language: "en",
+    forceBackend: loadBackendMode() === "wasm" ? "wasm" : undefined,
     onProgress: (progress, status) => {
       modelPercent = progress;
       modelStatus.textContent = status;
@@ -461,6 +490,13 @@ modelInput.addEventListener("input", () => {
 });
 modelReload.addEventListener("click", () => {
   hideError();
+  void ensureWhisperModel(true);
+});
+backendMode.value = loadBackendMode();
+backendMode.addEventListener("change", () => {
+  const value = backendMode.value === "wasm" ? "wasm" : "auto";
+  saveBackendMode(value);
+  if (capture) return; // a live meeting keeps the backend it started with
   void ensureWhisperModel(true);
 });
 
@@ -693,6 +729,10 @@ async function handleStart(): Promise<void> {
     );
     liveLabel.textContent = "Recording";
     modelStatus.textContent = modelInput.value;
+    transcriptionLevel.textContent = "—";
+    transcriptionWindows.textContent = "—";
+    silentWarned = false;
+    wordsWarned = false;
     lastRollingAt = 0;
     rollingInFlight = false;
     syncAiStatusSummary();
@@ -710,7 +750,11 @@ async function handleStart(): Promise<void> {
         model: activeModelId(),
         chunkDurationMs: clampNumber(chunkInput.value, 2, 30, 6) * 1000,
         overlapMs: clampNumber(overlapInput.value, 0, 10, 2) * 1000,
-        silenceRmsThreshold: 0.008,
+        /* Only true digital silence should be skipped. This used to be 0.008,
+           which is loud enough that quiet meeting audio (a distant laptop
+           microphone, system audio at half volume) was dropped window after
+           window with no feedback at all. */
+        silenceRmsThreshold: 0.0015,
         language: "en",
       },
       {
@@ -731,6 +775,7 @@ async function handleStart(): Promise<void> {
         onLag: (lag) => {
           transcriptionLag.textContent = `${Math.round(lag)} ms`;
         },
+        onDiagnostics: handleTranscriptionDiagnostics,
         onError: showError,
       },
       client,
@@ -933,8 +978,57 @@ async function requestLatestIntelligence(): Promise<void> {
   }
 }
 
-function transcriptText(): string {
-  return latestSegments
+/** Shown after this long with every window too quiet to transcribe. */
+const SILENCE_WARNING_MS = 8_000;
+
+let silentWarned = false;
+let wordsWarned = false;
+
+/** Level, in percent, with a decimal while it is low enough to read as "0%". */
+function formatLevelPercent(value: number): string {
+  if (value < 1) return `${value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
+}
+
+/**
+ * Turns window counters into visible feedback.
+ *
+ * Windows below the silence threshold are skipped to save work, which used to
+ * be invisible: a quiet microphone produced "Listening for the first words…"
+ * forever, with no hint that the audio was the problem. The two warnings below
+ * separate "we cannot hear you" from "we can hear you but the model is not
+ * answering".
+ */
+function handleTranscriptionDiagnostics(
+  snapshot: TranscriptionDiagnostics,
+): void {
+  const level = formatLevelPercent(snapshot.level * 100);
+  transcriptionLevel.textContent = level;
+  transcriptionWindows.textContent = `${snapshot.transcribed} transcribed · ${snapshot.skippedSilent} too quiet`;
+
+  if (snapshot.silentMs < SILENCE_WARNING_MS) {
+    silentWarned = false;
+  } else if (!silentWarned) {
+    silentWarned = true;
+    showError(
+      `No audio is reaching the transcriber (input level ${level}). Check that you shared Entire Screen with "Share system audio", that the meeting is playing sound, and that your microphone is not muted.`,
+    );
+    return;
+  }
+
+  if (latestSegments.length > 0) {
+    wordsWarned = false;
+    return;
+  }
+  if (snapshot.transcribed >= 6 && !wordsWarned) {
+    wordsWarned = true;
+    showError(
+      `Audio is reaching the transcriber (level ${level}) but the model has not returned any words. Reload the model on the preparation screen, or set Compute to "CPU only" in Settings.`,
+    );
+  }
+}
+
+function transcriptText(): string {  return latestSegments
     .slice(-100)
     .map((segment) => segment.text)
     .join(" ");
@@ -1265,7 +1359,9 @@ function readLevel(analyser: AnalyserNode): number {
 }
 function setMeter(name: keyof typeof meterElements, value: number): void {
   meterElements[name].fill.style.width = `${value}%`;
-  meterElements[name].value.textContent = `${Math.round(value)}%`;
+  /* Quiet inputs would otherwise read as a flat 0%, which looks like a dead
+     microphone rather than a low level. */
+  meterElements[name].value.textContent = formatLevelPercent(value);
 }
 function resetMeters(): void {
   for (const name of Object.keys(meterElements) as Array<

@@ -8,6 +8,8 @@ import type {
 export type WhisperClientOptions = {
   model: string;
   language?: string;
+  /** Skips the GPU probe: used as a compatibility escape hatch. */
+  forceBackend?: WhisperBackend;
   onProgress?: (progress: number, status: string) => void;
   onBackend?: (backend: WhisperBackend) => void;
   onError?: (message: string) => void;
@@ -61,9 +63,9 @@ export class WhisperClient {
   }
 
   private async detectBackendAndLoad(): Promise<void> {
-    const backend: WhisperBackend = (await supportsWebGpu())
-      ? "webgpu"
-      : "wasm";
+    const backend: WhisperBackend =
+      this.options.forceBackend ??
+      ((await supportsWebGpu()) ? "webgpu" : "wasm");
     this.options.onBackend?.(backend);
     await this.startLoading(backend);
   }
