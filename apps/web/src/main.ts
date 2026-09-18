@@ -115,6 +115,7 @@ const railToggle = $("rail-toggle") as HTMLButtonElement;
 const railMode = $("rail-mode");
 const prepareTitle = $("prepare-title") as HTMLInputElement;
 const prepareModel = $("prepare-model");
+const backendHint = $("backend-hint");
 const deepseekState = $("deepseek-state");
 const aiSettings = $("ai-settings");
 const aiSettingsOffNote = $("ai-settings-off-note");
@@ -151,6 +152,7 @@ const finalisePanel = $("finalise");
 const finaliseError = $("finalise-error");
 const finaliseErrorText = $("finalise-error-text");
 const finaliseState = $("finalise-state");
+const finaliseProgress = $("finalise-progress");
 const notesSkeleton = $("notes-skeleton");
 const noteFields = {
   summary: $("note-summary") as HTMLTextAreaElement,
@@ -514,6 +516,8 @@ async function handleStart(): Promise<void> {
     setMeetingState("live");
     notesSkeleton.classList.remove("hidden");
     setFinaliseState("listening");
+    if (!isConfigured(currentAiConfig()))
+      finaliseState.textContent = "Add an AI key in Settings to fill these in";
     durationLabel.textContent = "Elapsed";
     for (const field of Object.values(noteFields)) field.value = "";
     growAllFields();
@@ -552,6 +556,10 @@ async function handleStart(): Promise<void> {
         },
         onBackend: (backend) => {
           backendElement.textContent = `Backend: ${backend.toUpperCase()}`;
+          backendHint.textContent =
+            backend === "webgpu"
+              ? "WebGPU is active — Whisper runs on your GPU."
+              : "No WebGPU adapter, so Chrome runs Whisper single-threaded on the CPU (GitHub Pages cannot turn on WebAssembly threads). Updates take a few seconds; the app widens its window to keep up.";
         },
         onSegment: (segment, all) => {
           latestSegments = all;
@@ -777,6 +785,7 @@ function applyNotes(result: IntelligenceResult): void {
   latestSummary = { ...result };
   renderNoteSections(result);
   aiOutput.textContent = formatIntelligence(latestSummary);
+  finaliseState.textContent = "Notes just updated";
 }
 
 function currentAiConfig(): AiConfig {
@@ -1208,8 +1217,13 @@ function applyTranscriptFilter(): void {
 function setFinaliseState(
   state: "listening" | "finalising" | "done" | "error",
 ): void {
-  finalisePanel.classList.toggle("hidden", state !== "finalising");
-  finalisePanel.setAttribute("aria-hidden", String(state !== "finalising"));
+  /* The notes editor stays on screen for the whole meeting. It used to be shown
+     only while "finalising", so generated notes were written into a hidden
+     panel and never seen. Only the progress strip and the error strip are
+     state-dependent. */
+  finalisePanel.classList.remove("hidden");
+  finalisePanel.setAttribute("aria-hidden", "false");
+  finaliseProgress.classList.toggle("hidden", state !== "finalising");
   finaliseError.classList.toggle("hidden", state !== "error");
   if (state === "listening") finaliseState.textContent = "Listening quietly";
   if (state === "finalising") finaliseState.textContent = "Finalising notes…";

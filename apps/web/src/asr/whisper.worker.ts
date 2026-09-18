@@ -9,9 +9,24 @@ let disposed = false;
 let loadedModel = "";
 let loadedBackend: "webgpu" | "wasm" = "wasm";
 let pipeline: unknown = null;
+/** Serialises inference: one pipeline, one generate() at a time. */
+let queue: Promise<void> = Promise.resolve();
 
-self.onmessage = async (event: MessageEvent<WhisperWorkerRequest>) => {
+self.onmessage = (event: MessageEvent<WhisperWorkerRequest>) => {
   const message = event.data;
+  if (message.type === "transcribe") {
+    /* Overlapping generate() calls on a single ONNX pipeline compete for the
+       same decoder cache and CPU: they slow each other down instead of
+       finishing sooner, so requests are chained. */
+    queue = queue.then(() => runTranscribe(message));
+    return;
+  }
+  void runControl(message);
+};
+
+async function runControl(
+  message: Exclude<WhisperWorkerRequest, { type: "transcribe" }>,
+): Promise<void> {
   try {
     if (message.type === "load") {
       disposed = false;
@@ -19,18 +34,6 @@ self.onmessage = async (event: MessageEvent<WhisperWorkerRequest>) => {
       loadedBackend = message.backend;
       await loadWhisperRuntime(message.model, message.backend);
       post({ type: "loaded", model: loadedModel, backend: loadedBackend });
-      return;
-    }
-    if (message.type === "transcribe") {
-      if (!loadedModel || disposed)
-        throw new Error("Whisper model is not loaded");
-      const segment = await transcribeChunk(
-        message.audio,
-        message.startMs,
-        message.endMs,
-        message.language,
-      );
-      if (segment) post({ type: "segment", id: message.id, segment });
       return;
     }
     if (message.type === "dispose") {
@@ -44,10 +47,30 @@ self.onmessage = async (event: MessageEvent<WhisperWorkerRequest>) => {
     post({
       type: "error",
       message: error instanceof Error ? error.message : "Whisper worker failed",
-      id: "id" in message ? message.id : undefined,
     });
   }
-};
+}
+
+async function runTranscribe(
+  message: Extract<WhisperWorkerRequest, { type: "transcribe" }>,
+): Promise<void> {
+  try {
+    if (!loadedModel || disposed) throw new Error("Whisper model is not loaded");
+    const segment = await transcribeChunk(
+      message.audio,
+      message.startMs,
+      message.endMs,
+      message.language,
+    );
+    if (segment) post({ type: "segment", id: message.id, segment });
+  } catch (error) {
+    post({
+      type: "error",
+      message: error instanceof Error ? error.message : "Whisper worker failed",
+      id: message.id,
+    });
+  }
+}
 
 async function loadWhisperRuntime(
   model: string,

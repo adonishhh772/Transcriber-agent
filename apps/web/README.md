@@ -12,7 +12,7 @@ Recommended company-laptop starting point:
 - A quantized base English model can improve accuracy but may require roughly 2–4x the download and memory budget.
 - Actual memory, load time, and real-time factor depend heavily on CPU, GPU, browser version, and model files.
 
-The UI defaults to 6-second chunks with 2 seconds of overlap, suppresses low-RMS chunks, and deduplicates repeated boundary words. Chunk and overlap values are configurable before capture.
+The UI defaults to 6-second windows with 2 seconds of overlap, suppresses low-RMS windows, and deduplicates repeated boundary words. Window and overlap values are configurable before capture. Cadence adapts at runtime (`src/asr/chunkScheduler.ts`): the first window after speech starts is short so words appear after a couple of seconds, the stride then tracks the measured inference time — a slow CPU fallback widens it (fewer, longer strides) while a GPU narrows it for near-continuous updates — and stale audio is dropped only when the device still cannot keep up, so the transcript never drifts minutes behind.
 
 ## Requirements
 
@@ -50,7 +50,7 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, pause/resume, end meeting).
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, pause/resume, end meeting).
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, and a non-blocking provider error with Retry.
 5. **Settings** — Privacy (local-only mode), AI notes (provider, model, key, test, forget) and Transcription (Whisper model, chunk, overlap).
 

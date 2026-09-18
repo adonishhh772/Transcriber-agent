@@ -138,5 +138,16 @@ export class WhisperClient {
 }
 
 async function supportsWebGpu(): Promise<boolean> {
-  return "gpu" in navigator;
+  /* `"gpu" in navigator` is not enough: Chrome exposes the object even when no
+     adapter is available (software rendering, blocked GPU), and a failed load
+     then costs a full model download before falling back to WASM. */
+  const gpu = (navigator as Navigator & {
+    gpu?: { requestAdapter?: () => Promise<unknown | null> };
+  }).gpu;
+  if (typeof gpu?.requestAdapter !== "function") return false;
+  try {
+    return Boolean(await gpu.requestAdapter());
+  } catch {
+    return false;
+  }
 }

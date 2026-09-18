@@ -1,10 +1,11 @@
-import { createAudioChunks } from "../audio/chunking";
+import { rmsLevel } from "../audio/levels";
 import { resampleLinear, TARGET_SAMPLE_RATE } from "../audio/pcm";
 import type { CaptureStreams } from "../capture/browserCapture";
 import {
   mergeOverlappingTranscript,
   type TranscriptSegment,
 } from "../transcript/dedup";
+import { planChunk, resolveScheduler } from "./chunkScheduler";
 import { WhisperClient } from "./whisperClient";
 
 export type TranscriptionSettings = {
@@ -24,16 +25,26 @@ export type TranscriptionCallbacks = {
   onError: (message: string) => void;
 };
 
+/** Safety net so a stalled worker cannot grow the pending buffer forever. */
+const MAX_PENDING_MS = 30_000;
+
 export class TranscriptionController {
   private readonly settings: TranscriptionSettings;
   private readonly callbacks: TranscriptionCallbacks;
   private readonly client: WhisperClient;
+  private readonly scheduler;
   private capture: CaptureStreams | null = null;
   private processor: ScriptProcessorNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private silentGain: GainNode | null = null;
-  private buffered = new Float32Array();
-  private processedSamples = 0;
+  /** Audio waiting to be transcribed, starting at `bufferStartSample`. */
+  private pending = new Float32Array(0);
+  private bufferStartSample = 0;
+  private inferenceMs = 0;
+  private inFlight = 0;
+  private transcribedOnce = false;
+  private preferShortChunk = true;
+  private skippedMs = 0;
   private segments: TranscriptSegment[] = [];
   private paused = false;
   private stopped = false;
@@ -50,6 +61,11 @@ export class TranscriptionController {
       onBackend: callbacks.onBackend,
       onError: callbacks.onError,
       language: settings.language,
+    });
+    this.scheduler = resolveScheduler({
+      sampleRate: TARGET_SAMPLE_RATE,
+      chunkMs: settings.chunkDurationMs,
+      overlapMs: settings.overlapMs,
     });
   }
 
@@ -90,8 +106,13 @@ export class TranscriptionController {
     this.processor = null;
     this.source = null;
     this.silentGain = null;
-    this.buffered = new Float32Array();
-    this.processedSamples = 0;
+    this.pending = new Float32Array(0);
+    this.bufferStartSample = 0;
+    this.inferenceMs = 0;
+    this.inFlight = 0;
+    this.transcribedOnce = false;
+    this.preferShortChunk = true;
+    this.skippedMs = 0;
     this.client.dispose();
     this.segments = [];
     this.callbacks.onState("Stopped");
@@ -101,49 +122,73 @@ export class TranscriptionController {
     return [...this.segments];
   }
 
+  /** Milliseconds of audio dropped to stay close to real time. */
+  getSkippedMs(): number {
+    return this.skippedMs;
+  }
+
   private handleAudio(input: Float32Array, sourceRate: number): void {
     if (this.paused || this.stopped) return;
     const mono16k = resampleLinear(input, sourceRate, TARGET_SAMPLE_RATE);
-    const merged = new Float32Array(this.buffered.length + mono16k.length);
-    merged.set(this.buffered);
-    merged.set(mono16k, this.buffered.length);
-    const chunkSamples = Math.round(
-      (TARGET_SAMPLE_RATE * this.settings.chunkDurationMs) / 1000,
-    );
-    const overlapSamples = Math.round(
-      (TARGET_SAMPLE_RATE * this.settings.overlapMs) / 1000,
-    );
-    const chunks = createAudioChunks(merged, {
-      sampleRate: TARGET_SAMPLE_RATE,
-      chunkDurationMs: this.settings.chunkDurationMs,
-      overlapMs: this.settings.overlapMs,
-      silenceRmsThreshold: this.settings.silenceRmsThreshold,
-    });
-
-    if (chunks.length === 0 || merged.length < chunkSamples) {
-      this.buffered = merged;
-      return;
-    }
-
-    const keepFrom = Math.max(0, merged.length - overlapSamples);
-    this.buffered = merged.slice(keepFrom);
-    for (const chunk of chunks.slice(0, -1)) {
-      const absoluteStart = Math.round(
-        ((this.processedSamples + (chunk.startMs * TARGET_SAMPLE_RATE) / 1000) *
-          1000) /
-          TARGET_SAMPLE_RATE,
-      );
-      const absoluteEnd = Math.round(
-        ((this.processedSamples + (chunk.endMs * TARGET_SAMPLE_RATE) / 1000) *
-          1000) /
-          TARGET_SAMPLE_RATE,
-      );
-      void this.enqueueChunk(chunk.samples, absoluteStart, absoluteEnd);
-    }
-    this.processedSamples += Math.max(0, merged.length - overlapSamples);
+    if (mono16k.length === 0) return;
+    const merged = new Float32Array(this.pending.length + mono16k.length);
+    merged.set(this.pending);
+    merged.set(mono16k, this.pending.length);
+    this.pending = merged;
+    this.trimOverflow();
+    this.drain();
   }
 
-  private async enqueueChunk(
+  /** Starts at most one inference per call; the next callback continues. */
+  private drain(): void {
+    for (let guard = 0; guard < 4; guard += 1) {
+      const plan = planChunk(
+        {
+          availableSample: this.bufferStartSample + this.pending.length,
+          consumedSample: this.bufferStartSample,
+          preferShortChunk: this.preferShortChunk,
+          lastInferenceMs: this.inferenceMs,
+          inFlight: this.inFlight,
+        },
+        this.scheduler,
+      );
+
+      if (plan.action === "wait") return;
+
+      if (plan.action === "skip") {
+        this.skippedMs += plan.droppedMs;
+        this.trimTo(plan.nextSample);
+        this.preferShortChunk = true;
+        continue;
+      }
+
+      const startOffset = plan.startSample - this.bufferStartSample;
+      const chunk = this.pending.slice(
+        startOffset,
+        startOffset + (plan.endSample - plan.startSample),
+      );
+      this.trimTo(plan.nextSample);
+
+      if (rmsLevel(chunk) < this.settings.silenceRmsThreshold) {
+        /* Nothing said: take the next window straight away and keep the short
+           window so speech after the pause is picked up quickly. */
+        this.preferShortChunk = true;
+        continue;
+      }
+
+      this.preferShortChunk = false;
+      this.transcribedOnce = true;
+      this.inFlight += 1;
+      void this.transcribeChunk(
+        chunk,
+        Math.round((plan.startSample * 1000) / TARGET_SAMPLE_RATE),
+        Math.round((plan.endSample * 1000) / TARGET_SAMPLE_RATE),
+      );
+      return;
+    }
+  }
+
+  private async transcribeChunk(
     samples: Float32Array,
     startMs: number,
     endMs: number,
@@ -151,7 +196,8 @@ export class TranscriptionController {
     const started = performance.now();
     try {
       const segment = await this.client.transcribe(samples, startMs, endMs);
-      this.callbacks.onLag(Math.max(0, performance.now() - started));
+      this.inferenceMs = performance.now() - started;
+      this.callbacks.onLag(Math.round(this.inferenceMs));
       if (!segment || this.stopped) return;
       const merged = mergeOverlappingTranscript(this.segments, segment);
       const newest = merged[merged.length - 1];
@@ -162,6 +208,26 @@ export class TranscriptionController {
       this.callbacks.onError(
         error instanceof Error ? error.message : "Transcription failed",
       );
+    } finally {
+      this.inFlight = Math.max(0, this.inFlight - 1);
     }
+  }
+
+  private trimTo(nextSample: number): void {
+    const offset = Math.max(
+      0,
+      Math.min(nextSample - this.bufferStartSample, this.pending.length),
+    );
+    if (offset === 0) return;
+    this.pending = this.pending.slice(offset);
+    this.bufferStartSample += offset;
+  }
+
+  private trimOverflow(): void {
+    const maxSamples = Math.round((TARGET_SAMPLE_RATE * MAX_PENDING_MS) / 1000);
+    if (this.pending.length <= maxSamples) return;
+    const drop = this.pending.length - maxSamples;
+    this.skippedMs += Math.round((drop * 1000) / TARGET_SAMPLE_RATE);
+    this.trimTo(this.bufferStartSample + drop);
   }
 }

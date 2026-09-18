@@ -868,6 +868,11 @@
                     Whisper model
                     <input id="model-input" value="Xenova/whisper-tiny.en" />
                   </label>
+                  <small class="field-hint" id="backend-hint"
+                    >WebGPU runs Whisper on the GPU. Without it Chrome falls
+                    back to single-threaded WebAssembly, which needs a few
+                    seconds per update.</small
+                  >
                   <div class="field-pair">
                     <label class="field" for="chunk-input">
                       Chunk (seconds)
@@ -1029,11 +1034,13 @@
                 </div>
 
                 <div id="finalise" class="finalise hidden" aria-hidden="true">
-                  <div class="finalise-head">
-                    <span class="spinner" aria-hidden="true"></span>
-                    <span>Finalising notes…</span>
+                  <div class="hidden" id="finalise-progress">
+                    <div class="finalise-head">
+                      <span class="spinner" aria-hidden="true"></span>
+                      <span>Finalising notes…</span>
+                    </div>
+                    <div class="finalise-bar"><span></span></div>
                   </div>
-                  <div class="finalise-bar"><span></span></div>
                 </div>
 
                 <section
