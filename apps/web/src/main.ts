@@ -89,6 +89,7 @@ const startLabel = $("start-label");
 const transcriptionLag = $("transcription-lag");
 const transcriptionLevel = $("transcription-level");
 const transcriptionWindows = $("transcription-windows");
+const transcriptionStatus = $("transcription-status");
 const transcriptOutput = $("transcript-output");
 const aiOutput = $("ai-output");
 const manualNotes = $("manual-notes") as HTMLTextAreaElement;
@@ -490,14 +491,27 @@ modelInput.addEventListener("input", () => {
 });
 modelReload.addEventListener("click", () => {
   hideError();
-  void ensureWhisperModel(true);
+  void reloadWhisperModel();
 });
+
+/**
+ * Reloads the model. During a meeting the fresh client is swapped into the
+ * running controller, so a reload can no longer leave it holding a disposed
+ * worker that silently returns nothing.
+ */
+async function reloadWhisperModel(): Promise<void> {
+  const client = await ensureWhisperModel(true);
+  if (!client) return;
+  if (transcription) {
+    transcription.setClient(client);
+    showToast("Whisper model reloaded");
+  }
+}
 backendMode.value = loadBackendMode();
 backendMode.addEventListener("change", () => {
   const value = backendMode.value === "wasm" ? "wasm" : "auto";
   saveBackendMode(value);
-  if (capture) return; // a live meeting keeps the backend it started with
-  void ensureWhisperModel(true);
+  void reloadWhisperModel();
 });
 
 /* ---- AI notes settings ---------------------------------------------- */
@@ -731,8 +745,12 @@ async function handleStart(): Promise<void> {
     modelStatus.textContent = modelInput.value;
     transcriptionLevel.textContent = "—";
     transcriptionWindows.textContent = "—";
+    transcriptionStatus.textContent = "";
     silentWarned = false;
     wordsWarned = false;
+    noWindowsWarned = false;
+    throttledWarned = false;
+    lastDiagnosticsAt = 0;
     lastRollingAt = 0;
     rollingInFlight = false;
     syncAiStatusSummary();
@@ -983,6 +1001,10 @@ const SILENCE_WARNING_MS = 8_000;
 
 let silentWarned = false;
 let wordsWarned = false;
+let noWindowsWarned = false;
+let throttledWarned = false;
+/** When the transcriber last reported anything at all. */
+let lastDiagnosticsAt = 0;
 
 /** Level, in percent, with a decimal while it is low enough to read as "0%". */
 function formatLevelPercent(value: number): string {
@@ -993,29 +1015,65 @@ function formatLevelPercent(value: number): string {
 /**
  * Turns window counters into visible feedback.
  *
- * Windows below the silence threshold are skipped to save work, which used to
- * be invisible: a quiet microphone produced "Listening for the first words…"
- * forever, with no hint that the audio was the problem. The two warnings below
- * separate "we cannot hear you" from "we can hear you but the model is not
- * answering".
+ * Every way this pipeline can stall used to look identical — "Listening for the
+ * first words…" — so the counters are shown in the transcript panel and each
+ * stall mode gets its own, actionable message.
  */
 function handleTranscriptionDiagnostics(
   snapshot: TranscriptionDiagnostics,
 ): void {
   const level = formatLevelPercent(snapshot.level * 100);
+  lastDiagnosticsAt = Date.now();
   transcriptionLevel.textContent = level;
   transcriptionWindows.textContent = `${snapshot.transcribed} transcribed · ${snapshot.skippedSilent} too quiet`;
+  const liveFor = startedAt === null ? 0 : Date.now() - startedAt;
+  const parts = [`input ${level}`];
+  if (snapshot.transcribed > 0)
+    parts.push(`${snapshot.transcribed} window${snapshot.transcribed === 1 ? "" : "s"}`);
+  if (snapshot.inFlightMs > 0)
+    parts.push(`working ${(snapshot.inFlightMs / 1000).toFixed(1)}s`);
+  else if (snapshot.sinceInferenceMs > 0)
+    parts.push(`last result ${(snapshot.sinceInferenceMs / 1000).toFixed(0)}s ago`);
+  transcriptionStatus.textContent = parts.join(" · ");
 
-  if (snapshot.silentMs < SILENCE_WARNING_MS) {
-    silentWarned = false;
-  } else if (!silentWarned) {
-    silentWarned = true;
+  /* 1. Nothing audible at all. */
+  if (snapshot.silentMs >= SILENCE_WARNING_MS) {
+    if (!silentWarned) {
+      silentWarned = true;
+      showError(
+        `No audio is reaching the transcriber (input level ${level}). Check that you shared Entire Screen with "Share system audio", that the meeting is playing sound, and that your microphone is not muted.`,
+      );
+    }
+    return;
+  }
+  silentWarned = false;
+
+  /* 2. Healthy level but not a single window produced: the audio never reached
+        the transcriber, which points at the capture graph rather than the model. */
+  if (
+    snapshot.transcribed + snapshot.skippedSilent === 0 &&
+    liveFor > 12_000 &&
+    !noWindowsWarned
+  ) {
+    noWindowsWarned = true;
     showError(
-      `No audio is reaching the transcriber (input level ${level}). Check that you shared Entire Screen with "Share system audio", that the meeting is playing sound, and that your microphone is not muted.`,
+      `The microphone is registering audio (${level}) but nothing is reaching the transcriber. Reload the page and start a new meeting; if it repeats, tell me and I will dig into the capture path.`,
     );
+  }
+
+  /* 3. An inference that never finishes: Chrome slows hidden tabs down hard, and
+        a meeting app is usually in front of this one. */
+  if (snapshot.inFlightMs > 30_000) {
+    if (!throttledWarned) {
+      throttledWarned = true;
+      showError(
+        `Transcription has been stuck for ${Math.round(snapshot.inFlightMs / 1000)}s. Chrome slows down tabs it cannot see — keep this tab visible (a second screen works) while the meeting records.`,
+      );
+    }
     return;
   }
 
+  /* 4. Audio is flowing through the model but no words come back. */
   if (latestSegments.length > 0) {
     wordsWarned = false;
     return;
@@ -1321,7 +1379,11 @@ function setCaptureStatus(status: {
 }
 
 function startTimers(): void {
+  /* Keep the start time: stopTimers() clears it, which used to leave the
+     elapsed clock frozen at 00:00 for the whole meeting. */
+  const start = startedAt ?? Date.now();
   stopTimers();
+  startedAt = start;
   meterTimer = window.setInterval(updateMeters, 100);
   durationTimer = window.setInterval(() => {
     if (startedAt === null) return;
@@ -1343,11 +1405,30 @@ function updateMeters(): void {
   if (!capture) return;
   const system = readLevel(capture.displayAnalyser);
   const microphone = readLevel(capture.microphoneAnalyser);
+  const mixed = readLevel(capture.mixedAnalyser);
   setMeter("system", system);
   setMeter("microphone", microphone);
-  setMeter("mixed", readLevel(capture.mixedAnalyser));
+  setMeter("mixed", mixed);
   floatMic.style.width = `${microphone}%`;
   floatSystem.style.width = `${system}%`;
+  syncTranscriptionStatus(mixed);
+}
+
+/**
+ * Keeps the transcript panel honest when the transcriber reports nothing at
+ * all: a live meeting whose windows never arrive is invisible otherwise.
+ */
+function syncTranscriptionStatus(mixedLevel: number): void {
+  if (startedAt === null) return;
+  const sinceDiagnostics = Date.now() - lastDiagnosticsAt;
+  if (sinceDiagnostics < 3000) return;
+  const level = formatLevelPercent(mixedLevel);
+  transcriptionStatus.textContent = `input ${level} · no windows yet`;
+  if (Date.now() - startedAt < 12_000 || noWindowsWarned) return;
+  noWindowsWarned = true;
+  showError(
+    `The microphone is registering audio (${level}) but no audio is reaching the transcriber. Reload the page and start a new meeting; if it repeats the capture path needs fixing.`,
+  );
 }
 function readLevel(analyser: AnalyserNode): number {
   if (meterBuffer.length !== analyser.fftSize)

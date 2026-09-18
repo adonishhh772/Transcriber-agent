@@ -32,6 +32,10 @@ export type TranscriptionDiagnostics = {
   skippedSilent: number;
   /** Consecutive milliseconds skipped as too quiet. */
   silentMs: number;
+  /** How long the current inference has been running (0 when idle). */
+  inFlightMs: number;
+  /** Milliseconds since the last finished inference (0 before the first). */
+  sinceInferenceMs: number;
 };
 
 /** Safety net so a stalled worker cannot grow the pending buffer forever. */
@@ -40,7 +44,8 @@ const MAX_PENDING_MS = 30_000;
 export class TranscriptionController {
   private readonly settings: TranscriptionSettings;
   private readonly callbacks: TranscriptionCallbacks;
-  private readonly client: WhisperClient;
+  /** Swappable: a reload replaces it, so it cannot be readonly. */
+  private client: WhisperClient;
   private readonly scheduler;
   private capture: CaptureStreams | null = null;
   private processor: ScriptProcessorNode | null = null;
@@ -58,6 +63,8 @@ export class TranscriptionController {
   private skippedSilentWindows = 0;
   private silentMs = 0;
   private lastLevel = 0;
+  private inFlightSince: number | null = null;
+  private lastInferenceAt = 0;
   private segments: TranscriptSegment[] = [];
   private paused = false;
   private stopped = false;
@@ -126,6 +133,8 @@ export class TranscriptionController {
     this.skippedSilentWindows = 0;
     this.silentMs = 0;
     this.lastLevel = 0;
+    this.inFlightSince = null;
+    this.lastInferenceAt = 0;
     /* The client is owned by the caller: the model stays loaded for the next
        meeting instead of being rebuilt every time. */
     this.segments = [];
@@ -204,6 +213,7 @@ export class TranscriptionController {
       this.transcribedWindows += 1;
       this.silentMs = 0;
       this.inFlight += 1;
+      this.inFlightSince = performance.now();
       this.emitDiagnostics();
       void this.transcribeChunk(
         chunk,
@@ -220,6 +230,14 @@ export class TranscriptionController {
       transcribed: this.transcribedWindows,
       skippedSilent: this.skippedSilentWindows,
       silentMs: this.silentMs,
+      inFlightMs:
+        this.inFlightSince === null
+          ? 0
+          : Math.round(performance.now() - this.inFlightSince),
+      sinceInferenceMs:
+        this.lastInferenceAt === 0
+          ? 0
+          : Math.round(performance.now() - this.lastInferenceAt),
     });
   }
 
@@ -245,7 +263,21 @@ export class TranscriptionController {
       );
     } finally {
       this.inFlight = Math.max(0, this.inFlight - 1);
+      this.inFlightSince = this.inFlight > 0 ? this.inFlightSince : null;
+      this.lastInferenceAt = performance.now();
+      this.emitDiagnostics();
     }
+  }
+
+  /**
+   * Swaps in a freshly loaded model (used when the user reloads it, or when a
+   * backend has to be abandoned mid-meeting).
+   */
+  setClient(client: WhisperClient): void {
+    this.client = client;
+    this.inferenceMs = 0;
+    this.inFlight = 0;
+    this.inFlightSince = null;
   }
 
   private trimTo(nextSample: number): void {
