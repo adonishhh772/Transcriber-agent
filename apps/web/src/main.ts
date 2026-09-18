@@ -195,6 +195,9 @@ const durationLabel = $("duration-label");
 const floatDuration = $("float-duration");
 const floatMic = $("float-mic");
 const floatSystem = $("float-system");
+const floatScreen = $("float-screen");
+const floatScreenText = $("float-screen-text");
+const floatScreenSep = $("float-screen-sep");
 const panel = $("panel");
 const panelToggle = $("panel-toggle") as HTMLButtonElement;
 const panelClose = $("panel-close") as HTMLButtonElement;
@@ -1324,6 +1327,7 @@ async function handleStop(message?: string): Promise<void> {
   const recording = currentRecorder ? await currentRecorder.stop() : null;
   screenReader?.stop();
   screenReader = null;
+  clearScreenCapture();
   /* Back to the resting hint: which model reads the screen, or why none does. */
   syncScreenHint();
   if (currentTranscription) await currentTranscription.stop();
@@ -2212,6 +2216,7 @@ audioDownload.addEventListener("click", () => {
 function startScreenReading(streams: CaptureStreams): void {
   screenNotes = [];
   screenErrorShown = false;
+  clearScreenCapture();
   if (screenStatus) screenStatus.textContent = "";
   if (!currentAsrSettings().readScreen) return;
   /* Local-only mode promises that nothing leaves this device. Screen text can
@@ -2245,6 +2250,7 @@ function startScreenReading(streams: CaptureStreams): void {
     onSummary: (summary) => {
       screenNotes.push(summary);
       appendScreenNote(summary);
+      showScreenCapture(summary);
       logActivity("screen", summary.text);
       void updateIntelligence();
       void persistCurrentMeeting();
@@ -2305,6 +2311,38 @@ function appendScreenNote(note: { atMs: number; text: string }): void {
   transcriptOutput.append(row);
   applyTranscriptFilter();
   if (autoscrollEnabled) scrollTranscriptToEnd();
+}
+
+/* ============================================================
+   The newest capture, in the floating bar
+   ============================================================ */
+
+/**
+ * Shows the newest screen description in the live bar.
+ *
+ * The bar sits outside every view, so a capture stays visible wherever the user
+ * is — on another page, with the transcript panel closed, or while the right
+ * panel is showing AI activity. The full text is kept in the tooltip because the
+ * bar truncates it.
+ */
+function showScreenCapture(note: { atMs: number; text: string }): void {
+  if (!floatScreen || !floatScreenText) return;
+  floatScreenText.textContent = note.text;
+  floatScreen.title = `${formatDuration(Math.floor(note.atMs / 1000))} — ${note.text}`;
+  floatScreen.classList.remove("hidden");
+  floatScreenSep?.classList.remove("hidden");
+  floatScreen.classList.remove("is-new");
+  void floatScreen.offsetWidth;
+  floatScreen.classList.add("is-new");
+}
+
+function clearScreenCapture(): void {
+  if (!floatScreen || !floatScreenText) return;
+  floatScreenText.textContent = "";
+  floatScreen.title = "";
+  floatScreen.classList.add("hidden");
+  floatScreen.classList.remove("is-new");
+  floatScreenSep?.classList.add("hidden");
 }
 
 /* ============================================================

@@ -78,10 +78,17 @@ the app cannot restrict the picker further, because the browser deliberately
 leaves the choice to the user.
 
 A running meeting is no longer tied to its page: the live bar (elapsed time,
-input levels, audio size, Pause, End meeting and **Open meeting**) sits outside
-every view, so recording and transcription continue while you browse the library
-or settings, and one click returns to the meeting. Ending a meeting from another
-page brings that view back rather than opening a dialog you cannot see.
+input levels, audio size, **the newest shared-screen capture**, Pause, End
+meeting and **Open meeting**) sits outside every view, so recording and
+transcription continue while you browse the library or settings, and one click
+returns to the meeting. Ending a meeting from another page brings that view back
+rather than opening a dialog you cannot see.
+
+The capture chip matters because a screen description is otherwise only a row
+inside the right-hand panel: the bar is outside the views and fixed to the
+viewport, so the newest description — with its `mm:ss` and the full text in the
+tooltip — stays visible with the panel closed, while AI activity is showing, or
+scrolled to the bottom of a long transcript. It clears when the meeting ends.
 
 ## Requirements
 
@@ -119,7 +126,7 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, pause/resume, end meeting). While a meeting runs the workspace is the only screen: the navigation rail is hidden and the library and settings cannot be opened until the meeting ends.
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, pause/resume, end meeting). While a meeting runs the workspace is the only screen: the navigation rail is hidden and the library and settings cannot be opened until the meeting ends.
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
 5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
 

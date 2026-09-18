@@ -2428,6 +2428,48 @@ body:not([data-meeting-state="live"]) .panel-levels {
   background: var(--border);
 }
 
+/* Newest shared-screen description in the floating bar. It sits outside every
+   view, so a capture is visible whatever page or panel is showing. */
+.live-screen {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 320px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent-wash);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.live-screen .icon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  color: var(--accent-dark);
+}
+
+.live-screen-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A new capture announces itself without stealing focus. */
+.live-screen.is-new {
+  animation: screen-capture 1.4s ease-out;
+}
+
+@keyframes screen-capture {
+  0% {
+    background: var(--accent-soft);
+  }
+  100% {
+    background: var(--accent-wash);
+  }
+}
+
 /* Compact microphone / system-audio state inside the floating bar */
 .ctl-levels {
   display: flex;
@@ -2770,9 +2812,15 @@ body:not([data-meeting-state="live"]) .panel-levels {
     right: 12px;
     bottom: 12px;
     left: 12px;
+    flex-wrap: wrap;
     justify-content: space-between;
     transform: none;
     animation: controls-in-flat var(--t-base);
+  }
+
+  /* The bar is tight here, so the capture gets a smaller share of it. */
+  .live-screen {
+    max-width: 30vw;
   }
 
   @keyframes controls-in-flat {
@@ -2805,6 +2853,10 @@ body:not([data-meeting-state="live"]) .panel-levels {
   .live-label,
   .workspace-actions .btn-quiet {
     display: none;
+  }
+
+  .live-screen {
+    max-width: 34vw;
   }
 }
 
