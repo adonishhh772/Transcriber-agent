@@ -1116,7 +1116,8 @@ dt {
 }
 
 .advanced input,
-.ai-settings input {
+.ai-settings input,
+.asr-settings input {
   padding: 8px 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
@@ -1131,7 +1132,8 @@ dt {
 }
 
 .advanced input:focus,
-.ai-settings input:focus {
+.ai-settings input:focus,
+.asr-settings input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1145,11 +1147,13 @@ dt {
 }
 
 /* Optional AI notes service — only shown when local-only mode is off */
-.ai-settings {
+.ai-settings,
+.asr-settings {
   animation: page-in var(--t-base);
 }
 
 .ai-settings h2,
+.asr-settings h2,
 .settings-block h2 {
   margin-bottom: 8px;
   font-size: 1.02rem;
@@ -1157,12 +1161,14 @@ dt {
   letter-spacing: -0.015em;
 }
 
-.ai-settings .field {
+.ai-settings .field,
+.asr-settings .field {
   display: grid;
   gap: 6px;
 }
 
-.ai-settings .field > label {
+.ai-settings .field > label,
+.asr-settings .field > label {
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 0.65rem;
@@ -1235,7 +1241,9 @@ dt {
   margin-bottom: 14px;
 }
 
-.ai-settings select {
+.advanced select,
+.ai-settings select,
+.asr-settings select {
   width: 100%;
   padding: 8px 30px 8px 10px;
   border: 1px solid var(--border-strong);
@@ -1260,7 +1268,9 @@ dt {
     box-shadow var(--t-fast);
 }
 
-.ai-settings select:focus {
+.advanced select:focus,
+.ai-settings select:focus,
+.asr-settings select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1277,6 +1287,14 @@ dt {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Stacked controls in the speech-to-text section keep the same rhythm as the
+   AI-notes section: 14px between fields. */
+.asr-settings .field-grid + .field,
+.asr-settings .field + .field,
+.asr-settings .check-row + .ai-provider-summary {
+  margin-top: 14px;
 }
 
 .key-row input {

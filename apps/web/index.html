@@ -559,7 +559,7 @@
                   <svg class="icon"><use href="#i-activity"></use></svg>
                 </span>
                 <span class="setup-label">
-                  <strong>Whisper model</strong>
+                  <strong id="model-row-label">Whisper model</strong>
                   <small id="prepare-model"
                     >Xenova/whisper-tiny.en · local</small
                   >
@@ -726,18 +726,21 @@
                   </span>
                 </label>
 
-                <p class="field-hint" id="asr-summary" role="status"></p>
-                <p
+                <p class="ai-provider-summary" id="asr-summary" role="status"></p>
+                <section
                   class="notice notice-warning hidden"
                   id="asr-local-only-note"
                   role="status"
                 >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-help"></use>
+                  </svg>
                   <span
                     >Local-only mode is on, so Whisper runs in this browser and
                     no audio is uploaded. Turn it off to use a cloud
                     engine.</span
                   >
-                </p>
+                </section>
               </section>
 
               <section
@@ -955,11 +958,11 @@
             </section>
 
             <section class="settings-block">
-              <h2>Transcription</h2>
+              <h2>Local Whisper</h2>
               <p class="settings-copy">
-                How the browser runs Whisper locally. Larger chunks are more
-                accurate but appear later; overlap re-reads the end of each
-                chunk so words are not lost between them.
+                Settings for the offline engine. Larger chunks are more accurate
+                but appear later; overlap re-reads the end of each chunk so words
+                are not lost between them. Ignored while Deepgram is selected.
               </p>
               <details class="advanced" id="settings" open>
                 <summary>

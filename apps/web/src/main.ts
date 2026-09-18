@@ -151,6 +151,7 @@ const railToggle = $("rail-toggle") as HTMLButtonElement;
 const railMode = $("rail-mode");
 const prepareTitle = $("prepare-title") as HTMLInputElement;
 const prepareModel = $("prepare-model");
+const modelRowLabel = $("model-row-label");
 const backendHint = $("backend-hint");
 const deepseekState = $("deepseek-state");
 const aiSettings = $("ai-settings");
@@ -446,6 +447,7 @@ function syncModelState(): void {
     !privacyMode.checked;
   if (cloud) {
     const settings = currentAsrSettings();
+    modelRowLabel.textContent = "Transcription engine";
     prepareModel.textContent = `Deepgram ${settings.deepgramModel} · cloud`;
     startButton.disabled = !supported;
     if (startIconButton) startIconButton.disabled = false;
@@ -468,6 +470,7 @@ function syncModelState(): void {
           ? "not loaded"
           : "queued";
   prepareModel.textContent = `${activeModelId()} · ${state}`;
+  modelRowLabel.textContent = "Whisper model";
   startButton.disabled = !supported || modelState !== "ready";
   if (startIconButton) startIconButton.disabled = modelState !== "ready";
   modelReload.classList.toggle("hidden", modelState !== "error");
