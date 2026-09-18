@@ -13,6 +13,7 @@ import {
   type TranscriptionDiagnostics,
 } from "./asr/transcriptionController";
 import { DeepgramController } from "./asr/deepgramController";
+import { DeepgramStreamingClient } from "./asr/deepgramClient";
 import {
   DEEPGRAM_LANGUAGES,
   DEEPGRAM_MODELS,
@@ -62,6 +63,7 @@ import {
 } from "./intelligence/settings";
 import {
   MIN_PASSPHRASE_LENGTH,
+  createVault,
   encryptionAvailable,
   updateVault,
 } from "./intelligence/vault";
@@ -106,7 +108,6 @@ const deepgramModelOptions = $(
 const deepgramLanguage = $("deepgram-language") as HTMLSelectElement;
 const deepgramKey = $("deepgram-key") as HTMLInputElement;
 const deepgramKeyToggle = $("deepgram-key-toggle") as HTMLButtonElement;
-const deepgramRemember = $("deepgram-remember") as HTMLInputElement;
 const asrSummary = $("asr-summary");
 const asrLocalOnlyNote = $("asr-local-only-note");
 const modelReload = $("model-reload") as HTMLButtonElement;
@@ -209,14 +210,22 @@ const aiBaseUrl = $("ai-base-url") as HTMLInputElement;
 const aiBaseUrlLabel = $("ai-base-url-label");
 const aiBaseUrlHint = $("ai-base-url-hint");
 const aiKey = $("ai-key") as HTMLInputElement;
-const aiRemember = $("ai-remember") as HTMLInputElement;
-const aiVault = $("ai-vault");
-const aiVaultLabel = $("ai-vault-label");
-const aiVaultPass = $("ai-vault-pass") as HTMLInputElement;
-const aiVaultPassToggle = $("ai-vault-pass-toggle") as HTMLButtonElement;
-const aiVaultAction = $("ai-vault-action") as HTMLButtonElement;
-const aiVaultStatus = $("ai-vault-status");
-const aiLock = $("ai-lock") as HTMLButtonElement;
+const aiRemember = $("remember-keys") as HTMLInputElement;
+const aiVault = $("vault");
+const aiVaultLabel = $("vault-label");
+const aiVaultPass = $("vault-pass") as HTMLInputElement;
+const aiVaultPassToggle = $("vault-pass-toggle") as HTMLButtonElement;
+const aiVaultAction = $("vault-action") as HTMLButtonElement;
+const aiVaultStatus = $("vault-status");
+const aiLock = $("vault-lock") as HTMLButtonElement;
+/* Speech-to-text test/forget and the settings tabs */
+const deepgramTest = $("deepgram-test") as HTMLButtonElement;
+const deepgramForget = $("deepgram-forget") as HTMLButtonElement;
+const deepgramStatus = $("deepgram-status");
+const settingsTabs = Array.from(
+  document.querySelectorAll<HTMLButtonElement>("[data-settings-tab]"),
+);
+const asrPanel = $("asr-settings");
 const aiKeyLabel = $("ai-key-label");
 const aiKeyToggle = $("ai-key-toggle") as HTMLButtonElement;
 const aiProviderSummary = $("ai-provider-summary");
@@ -229,6 +238,10 @@ const aiCustom = $("ai-custom");
 const ROLLING_INTERVAL_MS = 25_000;
 
 let autoscrollEnabled = true;
+
+/** Which settings tab is showing. Declared with the other state so the boot
+    sequence, which renders it, can never run before it is initialised. */
+let settingsTab: "stt" | "notes" = "stt";
 
 let capture: CaptureStreams | null = null;
 let transcription: MeetingTranscriber | null = null;
@@ -299,7 +312,9 @@ function syncAsrSettingsUi(): void {
   deepgramLanguage.disabled = !cloud;
   deepgramKey.disabled = !cloud;
   deepgramKeyToggle.disabled = !cloud;
-  deepgramRemember.disabled = !cloud;
+  deepgramTest.disabled = !cloud;
+  deepgramForget.disabled = !cloud;
+  if (!cloud) setDeepgramStatus("");
   asrSummary.textContent = describeAsrProvider(settings, {
     localOnly: privacyMode.checked,
     deepgramKey: key,
@@ -691,6 +706,14 @@ function allowCloudAudioWhenChosen(): void {
   showToast("Local-only mode off: Deepgram needs to receive meeting audio");
 }
 
+for (const button of settingsTabs) {
+  button.addEventListener("click", () => {
+    setSettingsTab(
+      button.dataset.settingsTab === "notes" ? "notes" : "stt",
+    );
+  });
+}
+
 asrProvider.addEventListener("change", () => {
   const settings = currentAsrSettings();
   settings.provider = asrProvider.value === "local" ? "local" : "deepgram";
@@ -725,34 +748,6 @@ deepgramKeyToggle.addEventListener("click", () => {
   deepgramKey.type = showing ? "password" : "text";
   deepgramKeyToggle.textContent = showing ? "Show" : "Hide";
   deepgramKeyToggle.setAttribute("aria-pressed", String(!showing));
-});
-
-deepgramRemember.addEventListener("change", () => {
-  const key = deepgramKey.value.trim();
-  if (!deepgramRemember.checked) {
-    showToast("The Deepgram key stays in this tab only");
-    return;
-  }
-  if (rememberState() !== "unlocked") {
-    deepgramRemember.checked = false;
-    showToast(
-      "Unlock your vault in AI notes first, then this key can be remembered",
-    );
-    return;
-  }
-  if (!key) {
-    deepgramRemember.checked = false;
-    showToast("Paste the Deepgram key first");
-    return;
-  }
-  void updateVault((entries) => {
-    entries.deepgram = key;
-  })
-    .then(() => showToast("Deepgram key encrypted in the vault"))
-    .catch(() => {
-      deepgramRemember.checked = false;
-      showToast("The key could not be saved to the vault");
-    });
 });
 
 /* ---- AI notes settings ---------------------------------------------- */
@@ -795,31 +790,33 @@ aiKey.addEventListener("change", () => {
   const value = aiKey.value.trim();
   /* Typing a key always arms it for this session; remembering is opt-in. */
   setSessionKey(provider, value);
-  if (value && rememberState() === "unlocked")
-    void persistToVault(provider, value);
+  if (value && rememberState() === "unlocked") void persistKeysToVault();
   setAiStatus(value ? "Key ready for this session." : "");
   syncAiStatusSummary();
 });
 
+/* One vault for every key: the shared checkbox opens the passphrase panel and
+   remembers both the speech-to-text and the AI notes key. */
 aiRemember.addEventListener("change", () => {
   aiVault.classList.toggle("hidden", !aiRemember.checked);
-  if (!aiRemember.checked) {
-    setVaultStatus("");
-    if (rememberState() === "unlocked") {
-      void forgetRememberedKey(loadAiSettings().provider).then(
-        ({ erasedVault }) => {
-          setVaultStatus(
-            erasedVault ? "Vault erased." : "Key no longer remembered.",
-            "ok",
-          );
-          syncAiStatusSummary();
-        },
-      );
-    }
+  if (aiRemember.checked) {
+    refreshVaultPanel();
+    aiVaultPass.focus();
     return;
   }
-  refreshVaultPanel();
-  aiVaultPass.focus();
+  setVaultStatus("");
+  if (rememberState() !== "unlocked") return;
+  void Promise.all([
+    forgetRememberedKey(loadAiSettings().provider),
+    forgetRememberedKey("deepgram"),
+  ]).then((results) => {
+    const erased = results.some((result) => result.erasedVault);
+    setVaultStatus(
+      erased ? "Vault erased." : "Keys are no longer remembered.",
+      "ok",
+    );
+    syncAiStatusSummary();
+  });
 });
 
 aiVaultAction.addEventListener("click", () => void runVaultAction());
@@ -837,13 +834,14 @@ aiVaultPass.addEventListener("keydown", (event) => {
   }
 });
 aiLock.addEventListener("click", () => {
-  const provider = loadAiSettings().provider;
   lockRememberedKeys();
-  /* Locking means "stop using the key", not just "hide the stored copy". */
-  clearSessionKey(provider);
+  /* Locking means "stop using the keys", not just "hide the stored copy". */
+  clearSessionKey(loadAiSettings().provider);
+  clearSessionKey("deepgram");
   syncAiSettingsUi();
+  syncAsrSettingsUi();
   setVaultStatus(
-    "Vault locked and the key cleared from this session. Unlock to use it again.",
+    "Vault locked and the keys cleared from this session. Unlock to use them again.",
     "ok",
   );
   syncAiStatusSummary();
@@ -871,6 +869,20 @@ aiForget.addEventListener("click", () => {
   });
 });
 
+/* Speech-to-text tab: its own test and forget, like the notes tab. */
+deepgramTest.addEventListener("click", () => void runDeepgramTest());
+deepgramForget.addEventListener("click", () => {
+  clearSessionKey("deepgram");
+  void forgetRememberedKey("deepgram").then(({ erasedVault }) => {
+    deepgramKey.value = "";
+    syncAsrSettingsUi();
+    setDeepgramStatus(
+      erasedVault ? "Key forgotten. The vault was erased." : "Key forgotten.",
+      "ok",
+    );
+  });
+});
+
 backendUrl.addEventListener("change", () => {
   const settings = loadAiSettings();
   settings.baseUrl = backendUrl.value.trim();
@@ -889,6 +901,7 @@ aiTest.addEventListener("click", () => void runConnectionTest());
 aiReveal.addEventListener("click", () => {
   privacyMode.checked = false;
   syncPrivacyState();
+  setSettingsTab("notes");
   aiKey.focus();
   setAiStatus("Paste your key, then use Test connection.");
 });
@@ -2121,10 +2134,34 @@ function syncPrivacyState(): void {
   railMode.textContent = local ? "Local-only mode" : "Local capture · v0.1";
   backendUrl.disabled = local;
   apiToken.disabled = local;
-  /* The AI notes service is only configurable when it can actually be used. */
-  aiSettings.classList.toggle("hidden", local);
-  aiSettingsOffNote.classList.toggle("hidden", !local);
+  /* The notes settings are only usable once local-only mode is off; the tab
+     itself stays visible and explains why. */
+  applySettingsTab();
   syncAiStatusSummary();
+}
+
+/** Which settings tab is showing. */
+function setSettingsTab(tab: "stt" | "notes"): void {
+  settingsTab = tab;
+  applySettingsTab();
+}
+
+function applySettingsTab(): void {
+  const notesUsable = !privacyMode.checked;
+  asrPanel.classList.toggle("hidden", settingsTab !== "stt");
+  aiSettings.classList.toggle(
+    "hidden",
+    settingsTab !== "notes" || !notesUsable,
+  );
+  aiSettingsOffNote.classList.toggle(
+    "hidden",
+    settingsTab !== "notes" || notesUsable,
+  );
+  for (const button of settingsTabs) {
+    const active = button.dataset.settingsTab === settingsTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  }
 }
 
 /** Reflect the stored provider/model/key back into the settings controls. */
@@ -2218,25 +2255,45 @@ function refreshVaultPanel(): void {
 }
 
 /**
- * Reflect stored state into the checkbox. Only ever called when the view is
- * (re)rendered — never from a change handler, so it cannot fight the user.
+ * Reflect stored state into the shared checkbox. Only ever called when the view
+ * is (re)rendered — never from a change handler, so it cannot fight the user.
  */
 function syncRememberCheckbox(): void {
-  const provider = loadAiSettings().provider;
   const state = rememberState();
-  if (state === "locked")
+  if (state === "locked") {
     aiRemember.checked = true; // contents are unknowable until unlocked
-  else if (state === "unlocked")
-    aiRemember.checked = hasRememberedKey(provider);
+    return;
+  }
+  if (state === "unlocked") {
+    aiRemember.checked =
+      hasRememberedKey(loadAiSettings().provider) ||
+      hasRememberedKey("deepgram");
+    return;
+  }
+  /* No vault yet: offer to create one as soon as there is a key to store. */
+  aiRemember.checked =
+    hasSessionKey(loadAiSettings().provider) || hasSessionKey("deepgram");
 }
 
-async function persistToVault(
-  provider: ProviderId,
-  value: string,
-): Promise<void> {
+/** The keys that "remember" would store right now. */
+function keysToRemember(): Record<string, string> {
+  const entries: Record<string, string> = {};
+  const aiValue = aiKey.value.trim();
+  const speechValue = deepgramKey.value.trim();
+  if (aiValue) entries[loadAiSettings().provider] = aiValue;
+  if (speechValue) entries.deepgram = speechValue;
+  return entries;
+}
+
+/** Writes both keys into the already-unlocked vault. */
+async function persistKeysToVault(): Promise<void> {
+  const entries = keysToRemember();
+  if (Object.keys(entries).length === 0) return;
   try {
-    await rememberApiKey(provider, value, "");
-    setVaultStatus("Remembered key updated.", "ok");
+    await updateVault((stored) => {
+      Object.assign(stored, entries);
+    });
+    setVaultStatus("Remembered keys updated.", "ok");
   } catch (error) {
     setVaultStatus(
       error instanceof Error
@@ -2248,27 +2305,30 @@ async function persistToVault(
 }
 
 async function runVaultAction(): Promise<void> {
-  const provider = loadAiSettings().provider;
   const passphrase = aiVaultPass.value;
   const state = rememberState();
-  if (state === "none" && !aiKey.value.trim()) {
-    setVaultStatus("Enter the key first, then remember it.", "error");
+  const entries = keysToRemember();
+  if (state === "none" && Object.keys(entries).length === 0) {
+    setVaultStatus("Enter a key first, then remember it.", "error");
     return;
   }
   aiVaultAction.disabled = true;
   setVaultStatus(state === "locked" ? "Unlocking…" : "Encrypting…");
   try {
     if (state === "none") {
-      await rememberApiKey(provider, aiKey.value, passphrase);
-      setVaultStatus("Key encrypted and remembered on this device.", "ok");
+      await createVault(entries, passphrase);
+      setVaultStatus(
+        `Remembered ${Object.keys(entries).length} key(s) on this device.`,
+        "ok",
+      );
     } else if (state === "locked") {
       await unlockRememberedKeys(passphrase);
       setVaultStatus("Vault unlocked for this session.", "ok");
     } else {
-      await persistToVault(provider, aiKey.value);
+      await persistKeysToVault();
     }
     aiVaultPass.value = "";
-    aiKey.value = getApiKey(provider);
+    aiKey.value = getApiKey(loadAiSettings().provider);
     syncRememberCheckbox();
     refreshVaultPanel();
     syncAiSettingsUi();
@@ -2288,6 +2348,48 @@ async function runVaultAction(): Promise<void> {
 /** True when a remembered key exists but this session has not unlocked it. */
 function vaultIsLockingKeys(): boolean {
   return rememberState() === "locked" && !getApiKey(loadAiSettings().provider);
+}
+
+function setDeepgramStatus(
+  message: string,
+  tone: "ok" | "error" | "" = "",
+): void {
+  deepgramStatus.textContent = message;
+  deepgramStatus.className = `ai-status${tone ? ` is-${tone}` : ""}`;
+}
+
+/** Opens a short Deepgram connection to prove the key and settings work. */
+async function runDeepgramTest(): Promise<void> {
+  const key = deepgramKeyValue().trim();
+  if (!key) {
+    setDeepgramStatus("Add your Deepgram key first.", "error");
+    return;
+  }
+  const settings = currentAsrSettings();
+  deepgramTest.disabled = true;
+  setDeepgramStatus("Contacting Deepgram…");
+  const client = new DeepgramStreamingClient({
+    apiKey: key,
+    model: settings.deepgramModel,
+    language: settings.language,
+  });
+  try {
+    await client.connect();
+    setDeepgramStatus(
+      `Connection works — ${settings.deepgramModel} is streaming-ready.`,
+      "ok",
+    );
+  } catch (error) {
+    setDeepgramStatus(
+      error instanceof Error
+        ? error.message
+        : "Deepgram could not be reached.",
+      "error",
+    );
+  } finally {
+    await client.close().catch(() => undefined);
+    deepgramTest.disabled = false;
+  }
 }
 
 function syncAiStatusSummary(): void {

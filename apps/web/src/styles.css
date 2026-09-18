@@ -1225,6 +1225,17 @@ dt {
   animation: page-in var(--t-base);
 }
 
+/* Shared key vault: one control for every key, below the settings tabs. */
+.vault-block {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.vault-block .check-row {
+  margin-top: 0;
+}
+
 .vault .field {
   display: grid;
   gap: 6px;

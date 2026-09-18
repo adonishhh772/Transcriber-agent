@@ -647,10 +647,40 @@
             </section>
 
             <section class="settings-block">
+              <div
+                class="panel-tabs"
+                role="tablist"
+                aria-label="Transcription and notes"
+              >
+                <button
+                  id="tab-stt"
+                  class="panel-tab is-active"
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="asr-settings"
+                  data-settings-tab="stt"
+                >
+                  Speech-to-text
+                </button>
+                <button
+                  id="tab-notes"
+                  class="panel-tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="ai-settings"
+                  data-settings-tab="notes"
+                >
+                  AI notes
+                </button>
+              </div>
+
               <section
-                class="asr-settings"
+                class="asr-settings panel-body"
                 id="asr-settings"
-                aria-labelledby="asr-settings-heading"
+                role="tabpanel"
+                aria-labelledby="tab-stt"
               >
                 <h2 id="asr-settings-heading">Speech-to-text</h2>
                 <p class="settings-copy">
@@ -715,16 +745,24 @@
                   >
                 </div>
 
-                <label class="check-row" for="deepgram-remember">
-                  <input id="deepgram-remember" type="checkbox" />
-                  <span>
-                    <strong>Remember this key on this device</strong>
-                    <small
-                      >Stored in the same encrypted vault as your AI keys. The
-                      vault must be unlocked first.</small
-                    >
-                  </span>
-                </label>
+                <div class="ai-actions">
+                  <button id="deepgram-test" class="btn btn-quiet" type="button">
+                    Test connection
+                  </button>
+                  <button
+                    id="deepgram-forget"
+                    class="btn btn-quiet"
+                    type="button"
+                  >
+                    Forget key
+                  </button>
+                  <span
+                    id="deepgram-status"
+                    class="ai-status"
+                    role="status"
+                    aria-live="polite"
+                  ></span>
+                </div>
 
                 <p class="ai-provider-summary" id="asr-summary" role="status"></p>
                 <section
@@ -744,9 +782,10 @@
               </section>
 
               <section
-                class="ai-settings hidden"
+                class="ai-settings panel-body hidden"
                 id="ai-settings"
-                aria-labelledby="ai-settings-heading"
+                role="tabpanel"
+                aria-labelledby="tab-notes"
               >
                 <h2 id="ai-settings-heading">AI notes</h2>
                 <p class="settings-copy">
@@ -808,63 +847,6 @@
                       Show
                     </button>
                   </span>
-                </div>
-
-                <label class="check-row" for="ai-remember">
-                  <input id="ai-remember" type="checkbox" />
-                  <span>
-                    <strong>Remember this key on this device</strong>
-                    <small
-                      >Encrypted with a passphrase you choose. Without this, the
-                      key is kept only for this tab.</small
-                    >
-                  </span>
-                </label>
-
-                <div class="vault hidden" id="ai-vault">
-                  <div class="field">
-                    <label id="ai-vault-label" for="ai-vault-pass"
-                      >Vault passphrase</label
-                    >
-                    <span class="key-row">
-                      <input
-                        id="ai-vault-pass"
-                        type="password"
-                        autocomplete="new-password"
-                        placeholder="At least 8 characters"
-                      />
-                      <button
-                        id="ai-vault-pass-toggle"
-                        class="btn btn-quiet btn-compact"
-                        type="button"
-                        aria-pressed="false"
-                      >
-                        Show
-                      </button>
-                    </span>
-                  </div>
-                  <div class="ai-actions">
-                    <button
-                      id="ai-vault-action"
-                      class="btn btn-primary"
-                      type="button"
-                    >
-                      Save &amp; remember
-                    </button>
-                    <button
-                      id="ai-lock"
-                      class="btn btn-quiet hidden"
-                      type="button"
-                    >
-                      Lock now
-                    </button>
-                    <span
-                      id="ai-vault-status"
-                      class="ai-status"
-                      role="status"
-                      aria-live="polite"
-                    ></span>
-                  </div>
                 </div>
 
                 <div class="ai-actions">
@@ -936,7 +918,7 @@
                   >
                 </p>
               </section>
-              <div class="ai-enable hidden" id="ai-settings-off-note">
+              <div class="ai-enable panel-body hidden" id="ai-settings-off-note">
                 <h2>AI notes</h2>
                 <p class="settings-copy">
                   Optional. Turns your transcript into a summary, key points,
@@ -955,6 +937,67 @@
                   Audio and screen video never leave this device.
                 </p>
               </div>
+
+              <!-- One vault for every key: speech-to-text and AI notes. -->
+              <section class="vault-block" id="vault-block">
+                <label class="check-row" for="remember-keys">
+                  <input id="remember-keys" type="checkbox" />
+                  <span>
+                    <strong>Remember keys on this device</strong>
+                    <small
+                      >Your speech-to-text and AI notes keys are sealed together
+                      in one encrypted vault, readable only with the passphrase
+                      below. Without it, each key lives only for this tab.</small
+                    >
+                  </span>
+                </label>
+
+                <div class="vault hidden" id="vault">
+                  <div class="field">
+                    <label id="vault-label" for="vault-pass"
+                      >Vault passphrase</label
+                    >
+                    <span class="key-row">
+                      <input
+                        id="vault-pass"
+                        type="password"
+                        autocomplete="new-password"
+                        placeholder="At least 8 characters"
+                      />
+                      <button
+                        id="vault-pass-toggle"
+                        class="btn btn-quiet btn-compact"
+                        type="button"
+                        aria-pressed="false"
+                      >
+                        Show
+                      </button>
+                    </span>
+                  </div>
+                  <div class="ai-actions">
+                    <button
+                      id="vault-action"
+                      class="btn btn-primary"
+                      type="button"
+                    >
+                      Save &amp; remember
+                    </button>
+                    <button
+                      id="vault-lock"
+                      class="btn btn-quiet hidden"
+                      type="button"
+                    >
+                      Lock now
+                    </button>
+                    <span
+                      id="vault-status"
+                      class="ai-status"
+                      role="status"
+                      aria-live="polite"
+                    ></span>
+                  </div>
+                </div>
+              </section>
             </section>
 
             <section class="settings-block">
