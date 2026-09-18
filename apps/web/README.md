@@ -69,9 +69,15 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, pause/resume, end meeting).
-4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, and a non-blocking provider error with Retry.
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, pause/resume, end meeting). While a meeting runs the workspace is the only screen: the navigation rail is hidden and the library and settings cannot be opened until the meeting ends.
+4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
 5. **Settings** — Privacy (local-only mode), AI notes (provider, model, key, test, forget) and Transcription (Whisper model, chunk, overlap).
+
+### AI activity
+
+The **AI activity** tab is a changelog, not a snapshot: every AI update appends one timestamped line saying what moved — `Summary rewritten · 2 new key points`, `1 decision dropped`, `Final notes · unchanged · 3 key points, 1 action item` — alongside each shared-screen read, each question asked and any provider error. Consecutive identical failures collapse into one row whose timestamp stays current, so a provider that is down overnight cannot bury the log. The log is stored with the meeting and comes back when it is reopened.
+
+Questions and answers are stored with the meeting too, so a meeting can be re-opened and asked about days later; both the transcript and the notes are sent to the configured provider, nothing else.
 
 ## Real-time transcription with Deepgram
 

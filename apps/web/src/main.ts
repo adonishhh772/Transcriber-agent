@@ -30,6 +30,7 @@ import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
 import {
+  answerQuestion,
   describeConfiguration,
   describeScreen,
   isConfigured,
@@ -38,8 +39,17 @@ import {
   testConnection,
   type AiConfig,
 } from "./intelligence/client";
+import { buildAskPrompt, type AskTurn } from "./intelligence/ask";
+import {
+  ACTIVITY_LABELS,
+  describeNotesChange,
+  notesShape,
+  type AiActivityEntry,
+  type AiActivityKind,
+} from "./intelligence/activity";
 import {
   formatActionItem,
+  hasNotes,
   normalizeResult,
   type IntelligenceResult,
 } from "./intelligence/notes";
@@ -77,6 +87,7 @@ import {
   listMeetings,
   saveMeeting,
   saveMeetingAudio,
+  type MeetingQuestion,
   type MeetingRecord,
 } from "./history/db";
 import { searchMeetings } from "./history/search";
@@ -188,6 +199,8 @@ const panelTabs = Array.from(
 );
 const panelTranscript = $("panel-transcript");
 const panelActivity = $("panel-activity");
+const aiActivityList = $("ai-activity");
+const aiActivityEmpty = $("ai-activity-empty");
 const transcriptList = document.querySelector<HTMLElement>(".transcript-list")!;
 const transcriptSearch = $("transcript-search") as HTMLInputElement;
 const transcriptAutoscroll = $("transcript-autoscroll") as HTMLButtonElement;
@@ -207,6 +220,11 @@ const finaliseErrorText = $("finalise-error-text");
 const finaliseState = $("finalise-state");
 const finaliseProgress = $("finalise-progress");
 const notesSkeleton = $("notes-skeleton");
+const askForm = $("ask-form") as HTMLFormElement;
+const askInput = $("ask-input") as HTMLInputElement;
+const askButton = $("ask-button") as HTMLButtonElement;
+const askThreadElement = $("ask-thread");
+const askHint = $("ask-hint");
 const noteFields = {
   summary: $("note-summary") as HTMLTextAreaElement,
   keyPoints: $("note-key-points") as HTMLTextAreaElement,
@@ -306,6 +324,11 @@ let audioBytes = 0;
 let screenReader: ScreenReader | null = null;
 let screenNotes: Array<{ atMs: number; text: string }> = [];
 let screenErrorShown = false;
+/** Changelog of every AI suggestion, oldest first. */
+let aiActivity: AiActivityEntry[] = [];
+/** Questions asked about this meeting, oldest first. */
+let askThread: MeetingQuestion[] = [];
+let askingInFlight = false;
 
 /* ---- Speech-to-text engine --------------------------------------------
    Local Whisper stays available always; Deepgram is used when it is selected
@@ -1059,6 +1082,8 @@ async function handleStart(): Promise<void> {
     latestGeneratedNotes = {};
     recovering = false;
     latestSummary = null;
+    resetActivity();
+    restoreAskThread([]);
     setCaptureStatus(result.status);
     startedAt = Date.now();
     startTimers();
@@ -1335,21 +1360,22 @@ async function finaliseNotes(): Promise<void> {
       screenNotes: recentScreenNotes(),
     });
     notesSkeleton.classList.add("hidden");
-    applyNotes(result);
+    applyNotes(result, "final");
     await persistCurrentMeeting();
     setFinaliseState("done");
     showToast("Final notes are ready");
   } catch (error) {
     notesSkeleton.classList.add("hidden");
     setFinaliseState("error");
-    finaliseErrorText.textContent = `${
+    const message =
       error instanceof Error
         ? error.message
-        : "The AI provider could not generate notes."
-    } Your transcript is safe and saved locally.`;
+        : "The AI provider could not generate notes.";
+    finaliseErrorText.textContent = `${message} Your transcript is safe and saved locally.`;
     finaliseError.classList.remove("hidden");
     stateElement.textContent = "Transcript saved · AI notes unavailable";
     deepseekState.textContent = "Error";
+    logActivity("error", message);
   }
 }
 
@@ -1378,15 +1404,17 @@ async function requestLatestIntelligence(): Promise<void> {
       final: false,
       screenNotes: recentScreenNotes(),
     });
-    applyNotes(result);
+    applyNotes(result, "rolling");
     deepseekState.textContent = "Connected";
   } catch (error) {
-    aiOutput.textContent =
+    const message =
       error instanceof Error
         ? error.message
         : "AI notes are unavailable; local transcription continues.";
+    aiOutput.textContent = message;
     stateElement.textContent = "Local transcription active · AI unavailable";
     deepseekState.textContent = "Error";
+    logActivity("error", message);
   } finally {
     rollingInFlight = false;
   }
@@ -1496,13 +1524,28 @@ function transcriptText(): string {  return latestSegments
     .join(" ");
 }
 
-/** Single place that syncs a fresh result into notes, state and persistence. */
-function applyNotes(result: IntelligenceResult): void {
+/**
+ * Single place that syncs a fresh result into notes, state and persistence.
+ *
+ * The change is diffed against the previous notes first, so the activity log
+ * can say what actually moved rather than just "notes updated".
+ */
+function applyNotes(
+  result: IntelligenceResult,
+  source: "rolling" | "final" = "rolling",
+): void {
+  const change = describeNotesChange(
+    normalizeResult(latestGeneratedNotes),
+    result,
+  );
   latestGeneratedNotes = { ...result };
   latestSummary = { ...result };
   renderNoteSections(result);
   aiOutput.textContent = formatIntelligence(latestSummary);
   finaliseState.textContent = "Notes just updated";
+  syncAskState();
+  if (source === "final") logActivity("final", change ?? notesShape(result));
+  else if (change) logActivity("notes", change);
 }
 
 function currentAiConfig(): AiConfig {
@@ -1523,6 +1566,8 @@ async function persistCurrentMeeting(): Promise<void> {
     updatedAt: Date.now(),
     hasAudio: audioBytes > 0,
     screenNotes: screenNotes.length ? screenNotes : undefined,
+    aiActivity: aiActivity.length ? aiActivity : undefined,
+    qa: askThread.length ? askThread : undefined,
   });
   await loadHistory();
 }
@@ -1704,6 +1749,9 @@ function openMeeting(id: string): void {
   appendTranscript(latestSegments);
   screenNotes = meeting.screenNotes ?? [];
   for (const note of screenNotes) appendScreenNote(note);
+  aiActivity = meeting.aiActivity ?? [];
+  renderActivity();
+  restoreAskThread(meeting.qa ?? []);
   renderNoteSections(
     normalizeResult(meeting.summary ?? meeting.generatedNotes),
     false,
@@ -2152,6 +2200,7 @@ function startScreenReading(streams: CaptureStreams): void {
     onSummary: (summary) => {
       screenNotes.push(summary);
       appendScreenNote(summary);
+      logActivity("screen", summary.text);
       void updateIntelligence();
       void persistCurrentMeeting();
     },
@@ -2163,6 +2212,7 @@ function startScreenReading(streams: CaptureStreams): void {
       if (screenErrorShown) return;
       screenErrorShown = true;
       showError(`${message} Screen reading is off for this meeting.`);
+      logActivity("error", message);
       screenReader?.stop();
       screenReader = null;
     },
@@ -2197,10 +2247,180 @@ function appendScreenNote(note: { atMs: number; text: string }): void {
 }
 
 /* ============================================================
+   AI activity changelog
+   ============================================================ */
+
+/** Milliseconds since this meeting started, for every AI timestamp. */
+function meetingClock(): number {
+  return meetingStartedAt ? Date.now() - meetingStartedAt : 0;
+}
+
+function activityRow(entry: AiActivityEntry): HTMLElement {
+  const row = document.createElement("div");
+  row.className = `ai-activity-row is-${entry.kind}`;
+  const meta = document.createElement("div");
+  meta.className = "ai-activity-meta";
+  const stamp = document.createElement("time");
+  const seconds = Math.floor(entry.atMs / 1000);
+  stamp.dateTime = `PT${seconds}S`;
+  stamp.textContent = formatDuration(seconds);
+  const kind = document.createElement("span");
+  kind.className = "ai-activity-kind";
+  kind.textContent = ACTIVITY_LABELS[entry.kind];
+  meta.append(stamp, kind);
+  const text = document.createElement("p");
+  text.textContent = entry.text;
+  row.append(meta, text);
+  return row;
+}
+
+/** Newest first: the newest line must be visible without scrolling. */
+function renderActivity(): void {
+  aiActivityList.textContent = "";
+  if (!aiActivity.length) {
+    if (aiActivityEmpty) aiActivityList.append(aiActivityEmpty);
+    return;
+  }
+  for (let index = aiActivity.length - 1; index >= 0; index -= 1)
+    aiActivityList.append(activityRow(aiActivity[index]));
+}
+
+/** Records one AI update, and keeps the meeting's stored copy in step. */
+function logActivity(kind: AiActivityKind, text: string): void {
+  const trimmed = text.trim();
+  const last = aiActivity[aiActivity.length - 1];
+  /* A provider that is down fails on every rolling pass; one row that keeps its
+     time current beats a hundred identical ones. */
+  if (last && last.kind === kind && last.text === trimmed) {
+    last.atMs = meetingClock();
+    renderActivity();
+    void persistCurrentMeeting();
+    return;
+  }
+  aiActivity.push({ atMs: meetingClock(), kind, text: trimmed });
+  renderActivity();
+  void persistCurrentMeeting();
+}
+
+function resetActivity(): void {
+  aiActivity = [];
+  renderActivity();
+}
+
+/* ============================================================
+   Questions about a finished meeting
+   ============================================================ */
+
+/** Asking needs a key, a provider that can answer, and notes to answer from. */
+function syncAskState(): void {
+  const config = currentAiConfig();
+  const ready = isConfigured(config) && !privacyMode.checked;
+  const notesReady = hasNotes(normalizeResult(latestGeneratedNotes));
+  const usable = ready && notesReady && !askingInFlight;
+  askInput.disabled = !usable;
+  askButton.disabled = !usable;
+  if (!askHint) return;
+  if (askingInFlight) askHint.textContent = "Answering…";
+  else if (privacyMode.checked) askHint.textContent = "Off in local-only mode";
+  else if (!isConfigured(config))
+    askHint.textContent = "Add an AI key in Settings";
+  else if (!notesReady) askHint.textContent = "Unlocks once notes are written";
+  else askHint.textContent = "Answered from this meeting only";
+}
+
+function askTurnRow(turn: MeetingQuestion): { row: HTMLElement; answer: HTMLElement } {
+  const row = document.createElement("div");
+  row.className = "ask-turn";
+  const question = document.createElement("p");
+  question.className = "ask-question";
+  question.textContent = turn.question;
+  const answer = document.createElement("p");
+  answer.className = "ask-answer";
+  answer.textContent = turn.answer;
+  row.append(question, answer);
+  return { row, answer };
+}
+
+function renderAskThread(): void {
+  askThreadElement.textContent = "";
+  for (const turn of askThread) {
+    const { row } = askTurnRow(turn);
+    askThreadElement.append(row);
+  }
+}
+
+/** Seed the thread from a stored meeting, after the notes have been restored. */
+function restoreAskThread(turns: MeetingQuestion[]): void {
+  askThread = turns;
+  renderAskThread();
+  syncAskState();
+}
+
+async function askAboutMeeting(): Promise<void> {
+  const question = askInput.value.trim();
+  if (!question || askingInFlight) return;
+  const config = currentAiConfig();
+  if (!isConfigured(config) || privacyMode.checked) {
+    showToast("Add an AI key in Settings to ask about a meeting");
+    return;
+  }
+
+  askInput.value = "";
+  const turn: MeetingQuestion = { atMs: meetingClock(), question, answer: "" };
+  askThread.push(turn);
+  const { row, answer } = askTurnRow(turn);
+  answer.classList.add("is-pending");
+  answer.textContent = "Reading the transcript…";
+  askThreadElement.append(row);
+  askingInFlight = true;
+  syncAskState();
+
+  try {
+    const reply = await answerQuestion(
+      config,
+      buildAskPrompt(
+        {
+          transcript: transcriptText(),
+          notes: normalizeResult(latestGeneratedNotes),
+          screenNotes: recentScreenNotes(),
+        },
+        question,
+        askThread.slice(0, -1) as AskTurn[],
+      ),
+    );
+    turn.answer = reply;
+    answer.classList.remove("is-pending");
+    answer.textContent = reply;
+    logActivity("question", question);
+  } catch (error) {
+    /* A failed question is not part of the meeting's record. */
+    askThread.pop();
+    answer.classList.remove("is-pending");
+    answer.classList.add("is-error");
+    const message =
+      error instanceof Error ? error.message : "The question could not be answered.";
+    answer.textContent = message;
+    logActivity("error", message);
+  } finally {
+    askingInFlight = false;
+    syncAskState();
+  }
+}
+
+askForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void askAboutMeeting();
+});
+
+/* ============================================================
    Shell behaviour
    ============================================================ */
 
 function setView(view: ViewName): void {
+  if (!viewIsReachable(view)) {
+    showToast("End the meeting to leave the meeting screen");
+    return;
+  }
   const changed = document.body.dataset.view !== view;
   for (const [name, element] of Object.entries(views))
     element.classList.toggle("hidden", name !== view);
@@ -2229,9 +2449,17 @@ function setView(view: ViewName): void {
 
 function setMeetingState(state: MeetingState): void {
   document.body.dataset.meetingState = state;
-  /* The bar lives outside the views: it tracks the meeting, not the page. */
+  /* A running meeting owns the window: the rail disappears, and the library and
+     settings are out of reach until it ends. The bar lives outside the views:
+     it tracks the meeting, not the page. */
+  document.body.classList.toggle("is-meeting-live", state === "live");
   liveControls.classList.toggle("hidden", state !== "live");
   syncReturnButton();
+}
+
+/** Whether a view may be opened while a meeting is running. */
+function viewIsReachable(view: ViewName): boolean {
+  return document.body.dataset.meetingState !== "live" || view === "workspace";
 }
 
 /** Offers a way back to the meeting while it runs on another page. */
@@ -2362,6 +2590,9 @@ function currentMeetingRecord(): MeetingRecord {
     generatedNotes: latestGeneratedNotes,
     summary: latestSummary,
     updatedAt: Date.now(),
+    screenNotes: screenNotes.length ? screenNotes : undefined,
+    aiActivity: aiActivity.length ? aiActivity : undefined,
+    qa: askThread.length ? askThread : undefined,
   };
 }
 
@@ -2432,6 +2663,7 @@ function syncPrivacyState(): void {
      itself stays visible and explains why. */
   applySettingsTab();
   syncAiStatusSummary();
+  syncAskState();
 }
 
 /** Which settings tab is showing. */
@@ -2501,6 +2733,7 @@ function syncAiSettingsUi(): void {
     aiModelOptions.append(option);
   }
   syncAiStatusSummary();
+  syncAskState();
 }
 
 function setAiStatus(message: string, tone: "ok" | "error" | "" = ""): void {

@@ -1,4 +1,13 @@
 import type { TranscriptSegment } from "../transcript/dedup";
+import type { AiActivityEntry } from "../intelligence/activity";
+
+/** One question asked about a finished meeting, with the answer it received. */
+export type MeetingQuestion = {
+  /** Milliseconds since this meeting started. */
+  atMs: number;
+  question: string;
+  answer: string;
+};
 
 export type MeetingRecord = {
   id: string;
@@ -14,6 +23,10 @@ export type MeetingRecord = {
   hasAudio?: boolean;
   /** What the shared screen showed, in order. */
   screenNotes?: Array<{ atMs: number; text: string }>;
+  /** Changelog of what the AI suggested and when it changed. */
+  aiActivity?: AiActivityEntry[];
+  /** Questions asked about this meeting, in order. */
+  qa?: MeetingQuestion[];
 };
 
 /**
@@ -32,7 +45,7 @@ export type MeetingAudioRecord = {
 const DB_NAME = "transcriber-meetings";
 const STORE = "meetings";
 const AUDIO_STORE = "audio";
-export const MEETING_SCHEMA_VERSION = 3;
+export const MEETING_SCHEMA_VERSION = 4;
 
 export function openMeetingDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

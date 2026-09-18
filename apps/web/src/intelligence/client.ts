@@ -13,6 +13,7 @@ import {
   SYSTEM_PROMPT,
   type IntelligenceResult,
 } from "./notes";
+import { ASK_SYSTEM_PROMPT } from "./ask";
 import {
   getProvider,
   type ProviderDefinition,
@@ -111,37 +112,57 @@ export async function requestNotes(
    Wire formats
    ------------------------------------------------------------------------ */
 
+/** One text exchange: either notes JSON or a prose answer. */
+type TextRequest = {
+  system: string;
+  prompt: string;
+  /** Ask the provider for a JSON object rather than prose. */
+  json?: boolean;
+  maxTokens?: number;
+};
+
 async function callProvider(
   provider: ProviderDefinition,
   config: AiConfig,
   request: AiRequest,
 ): Promise<string> {
-  const prompt = buildPrompt(
-    request.transcript,
-    request.final,
-    request.screenNotes ?? [],
-  );
+  return callText(provider, config, {
+    system: SYSTEM_PROMPT,
+    prompt: buildPrompt(
+      request.transcript,
+      request.final,
+      request.screenNotes ?? [],
+    ),
+    json: true,
+  });
+}
+
+async function callText(
+  provider: ProviderDefinition,
+  config: AiConfig,
+  request: TextRequest,
+): Promise<string> {
   if (provider.wire === "anthropic-messages")
-    return callAnthropic(config, prompt);
-  if (provider.wire === "gemini") return callGemini(config, prompt);
-  return callChatCompletions(provider, config, prompt);
+    return callAnthropic(config, request);
+  if (provider.wire === "gemini") return callGemini(config, request);
+  return callChatCompletions(provider, config, request);
 }
 
 async function callChatCompletions(
   provider: ProviderDefinition,
   config: AiConfig,
-  prompt: string,
+  request: TextRequest,
 ): Promise<string> {
   const response = await postJson(
     endpointFor(provider, config),
     {
       model: config.model.trim() || provider.defaultModel,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
+        { role: "system", content: request.system },
+        { role: "user", content: request.prompt },
       ],
-      temperature: 0.2,
-      response_format: { type: "json_object" },
+      temperature: request.json ? 0.2 : 0.3,
+      ...(request.json ? { response_format: { type: "json_object" } } : {}),
     },
     { Authorization: `Bearer ${config.apiKey.trim()}` },
     provider.label,
@@ -157,7 +178,7 @@ async function callChatCompletions(
 
 async function callAnthropic(
   config: AiConfig,
-  prompt: string,
+  request: TextRequest,
 ): Promise<string> {
   // Anthropic blocks browser calls unless this header is present. It is also
   // part of the preflight allow-list, so it must be sent on every request.
@@ -165,9 +186,9 @@ async function callAnthropic(
     ENDPOINTS.anthropic,
     {
       model: config.model.trim() || "claude-haiku-4-5",
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
+      max_tokens: request.maxTokens ?? 2048,
+      system: request.system,
+      messages: [{ role: "user", content: request.prompt }],
     },
     {
       "x-api-key": config.apiKey.trim(),
@@ -183,7 +204,10 @@ async function callAnthropic(
   return contentToString(block?.text);
 }
 
-async function callGemini(config: AiConfig, prompt: string): Promise<string> {
+async function callGemini(
+  config: AiConfig,
+  request: TextRequest,
+): Promise<string> {
   const model = (config.model.trim() || "gemini-2.5-flash").replace(
     /^models\//,
     "",
@@ -191,11 +215,12 @@ async function callGemini(config: AiConfig, prompt: string): Promise<string> {
   const response = await postJson(
     `${GEMINI_BASE}/${encodeURIComponent(model)}:generateContent`,
     {
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: request.system }] },
+      contents: [{ role: "user", parts: [{ text: request.prompt }] }],
       generationConfig: {
-        temperature: 0.2,
-        responseMimeType: "application/json",
+        temperature: request.json ? 0.2 : 0.3,
+        ...(request.json ? { responseMimeType: "application/json" } : {}),
+        ...(request.maxTokens ? { maxOutputTokens: request.maxTokens } : {}),
       },
     },
     // Header rather than ?key= so the secret never lands in a URL or log.
@@ -237,6 +262,43 @@ async function callCustomServer(
   );
   // The backend already answers with the final JSON shape.
   return JSON.stringify(await response.json());
+}
+
+/* ---------------------------------------------------------------------------
+   Questions about a finished meeting
+   ------------------------------------------------------------------------ */
+
+/**
+ * Answers one question about a meeting in prose.
+ *
+ * Unlike notes this is free text, so no JSON format is requested — asking for
+ * `json_object` here would make models wrap the answer in a schema they were
+ * never asked to follow.
+ */
+export async function answerQuestion(
+  config: AiConfig,
+  prompt: string,
+): Promise<string> {
+  const provider = getProvider(config.provider);
+  if (provider.requiresKey && !config.apiKey.trim())
+    throw new Error(
+      `Add your ${provider.label} API key in Settings to ask about a meeting.`,
+    );
+  if (provider.id === "custom")
+    throw new Error(
+      "Asking questions needs a direct provider (DeepSeek, OpenAI, Claude, Gemini or OpenRouter). Your own server returns notes only.",
+    );
+
+  const text = (
+    await callText(provider, config, {
+      system: ASK_SYSTEM_PROMPT,
+      prompt,
+      maxTokens: 900,
+    })
+  ).trim();
+  if (!text)
+    throw new Error("The model returned an empty answer. Try rephrasing the question.");
+  return text;
 }
 
 /* ---------------------------------------------------------------------------

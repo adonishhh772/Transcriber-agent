@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  answerQuestion,
   describeConfiguration,
   describeScreen,
   endpointFor,
@@ -183,6 +184,80 @@ describe("screen reading", () => {
     await expect(
       describeScreen(config({ provider: "deepseek" }), "prompt", "http://x/y.png"),
     ).rejects.toThrow(/base64/i);
+  });
+});
+
+describe("answerQuestion", () => {
+  it("asks for prose, not JSON, and returns the answer as written", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        choices: [
+          { message: { content: "  The launch is on Friday.  " } },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const answer = await answerQuestion(config(), "When is the launch?");
+    expect(answer).toBe("The launch is on Friday.");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.deepseek.com/chat/completions");
+    const body = JSON.parse(init.body);
+    /* Asking a model for json_object here would wrap a prose answer in a
+       schema it was never given. */
+    expect(body.response_format).toBeUndefined();
+    expect(body.messages[0].role).toBe("system");
+    expect(body.messages[0].content).toMatch(/only from the material/);
+    expect(body.messages[1].content).toContain("When is the launch?");
+  });
+
+  it("routes Anthropic and Gemini through their own wires", async () => {
+    const claudeFetch = vi.fn().mockResolvedValue(
+      jsonResponse({ content: [{ type: "text", text: "Friday." }] }),
+    );
+    vi.stubGlobal("fetch", claudeFetch);
+    expect(
+      await answerQuestion(config({ provider: "anthropic" }), "When?"),
+    ).toBe("Friday.");
+    const claudeBody = JSON.parse(claudeFetch.mock.calls[0][1].body);
+    expect(claudeBody.max_tokens).toBe(900);
+    expect(claudeBody.response_format).toBeUndefined();
+
+    const geminiFetch = vi.fn().mockResolvedValue(
+      jsonResponse({ candidates: [{ content: { parts: [{ text: "Friday." }] } }] }),
+    );
+    vi.stubGlobal("fetch", geminiFetch);
+    expect(await answerQuestion(config({ provider: "gemini" }), "When?")).toBe(
+      "Friday.",
+    );
+    const geminiBody = JSON.parse(geminiFetch.mock.calls[0][1].body);
+    expect(geminiBody.generationConfig.responseMimeType).toBeUndefined();
+  });
+
+  it("needs a key, and a provider that can answer prose", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(
+      answerQuestion(config({ apiKey: "" }), "When?"),
+    ).rejects.toThrow(/API key/);
+    await expect(
+      answerQuestion(
+        config({ provider: "custom", baseUrl: "https://notes.example.com" }),
+        "When?",
+      ),
+    ).rejects.toThrow(/direct provider/);
+  });
+
+  it("turns an empty answer into something the user can act on", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ choices: [{ message: { content: "   " } }] }),
+      ),
+    );
+    await expect(answerQuestion(config(), "When?")).rejects.toThrow(
+      /empty answer/,
+    );
   });
 });
 
