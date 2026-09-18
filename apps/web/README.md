@@ -64,11 +64,12 @@ Four views share one shell (navigation rail + main region):
 
 - **Deepgram (default once a key is present)** — the browser opens a WebSocket
   straight to `wss://api.deepgram.com/v1/listen` with the user's key (sent as
-  the `token` sub-protocol, so it never appears in a URL), streams 100 ms frames
-  of 16 kHz mono PCM16 from the mixed meeting audio, and renders interim words as
-  they are spoken. Final results carry word timestamps and become ordinary
-  transcript segments, so notes, search, history and export are unchanged.
-  Nothing is downloaded or compiled, so a meeting starts instantly.
+  the `token` sub-protocol, so it never appears in a URL) and streams 100 ms
+  frames of 16 kHz mono PCM16 from the mixed meeting audio. Results are
+  **finals only**: each finished sentence is appended once, so nothing on screen
+  is rewritten while someone is talking. Final results carry word timestamps and
+  become ordinary transcript segments, so notes, search, history and export are
+  unchanged. Nothing is downloaded or compiled, so a meeting starts instantly.
 - **Local Whisper** — offline, nothing leaves the device, updates every few
   seconds.
 

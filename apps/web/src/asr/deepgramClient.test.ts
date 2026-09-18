@@ -71,7 +71,7 @@ afterEach(() => {
 });
 
 describe("buildListenUrl", () => {
-  it("asks for 16 kHz mono PCM with interim results", () => {
+  it("asks for 16 kHz mono PCM, finals only", () => {
     const url = new URL(
       buildListenUrl({ model: "nova-3", language: "en", sampleRate: 16_000 }),
     );
@@ -84,7 +84,8 @@ describe("buildListenUrl", () => {
       encoding: "linear16",
       sample_rate: "16000",
       channels: "1",
-      interim_results: "true",
+      /* Interim results rewrote one line while the speaker talked. */
+      interim_results: "false",
       smart_format: "true",
       punctuate: "true",
     }))

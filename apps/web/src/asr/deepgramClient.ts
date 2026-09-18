@@ -73,7 +73,10 @@ export function buildListenUrl(options: {
     encoding: "linear16",
     sample_rate: String(options.sampleRate),
     channels: "1",
-    interim_results: "true",
+    /* Finals only: interim results rewritten the same line as the speaker
+       talked, which looks like text being replaced. Each finished sentence is
+       appended once instead. */
+    interim_results: "false",
     smart_format: "true",
     punctuate: "true",
     vad_events: "true",

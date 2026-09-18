@@ -560,6 +560,7 @@ transcriptAutoscroll.addEventListener("click", () => {
   if (autoscrollEnabled) scrollTranscriptToEnd();
 });
 transcriptList.addEventListener("scroll", () => {
+  if (performance.now() < ignoreScrollUntil) return;
   const atEnd =
     transcriptList.scrollHeight -
       transcriptList.scrollTop -
@@ -954,17 +955,18 @@ async function handleStart(): Promise<void> {
     finaliseError.classList.add("hidden");
     transcriptOutput.textContent = "";
     transcriptList.scrollTop = 0;
-    renderTranscript(
-      undefined,
-      [],
+    renderTranscriptPlaceholder(
       effectiveAsrProvider() === "deepgram"
-        ? "Connecting to Deepgram…"
+        ? "Listening… words appear here as each sentence finishes."
         : modelState === "ready"
           ? "Listening for the first words…"
           : "Loading the English Whisper model locally…",
     );
     liveLabel.textContent = "Recording";
     modelStatus.textContent = modelInput.value;
+    /* Every meeting starts pinned to the newest line. */
+    autoscrollEnabled = true;
+    syncAutoscrollButton();
     transcriptionLevel.textContent = "—";
     transcriptionWindows.textContent = "—";
     transcriptionStatus.textContent = "";
@@ -989,8 +991,7 @@ async function handleStart(): Promise<void> {
     const onSegment = (segment: TranscriptSegment, all: TranscriptSegment[]) => {
       latestSegments = all;
       notesSkeleton.classList.add("hidden");
-      clearInterimTranscript();
-      renderTranscript(segment, all);
+      appendTranscript(all);
       void updateIntelligence();
       void persistCurrentMeeting();
     };
@@ -1017,7 +1018,6 @@ async function handleStart(): Promise<void> {
           onSegment,
           onLag,
           onError: showError,
-          onInterim: renderInterimTranscript,
           onFatal: (message: string) => void fallBackToLocalTranscription(message),
         },
       );
@@ -1062,7 +1062,7 @@ async function handleStart(): Promise<void> {
     livePill.className = "live-pill is-live";
     livePill.textContent =
       activeEngine === "deepgram"
-        ? "Live · Deepgram"
+        ? "Transcribing · Deepgram"
         : privacyMode.checked
           ? "Transcribing locally"
           : "Transcribing locally · AI ready";
@@ -1558,7 +1558,8 @@ function openMeeting(id: string): void {
   latestGeneratedNotes = meeting.generatedNotes;
   latestSummary = meeting.summary;
   recovering = true;
-  renderTranscript(latestSegments[latestSegments.length - 1], latestSegments);
+  renderTranscriptPlaceholder("");
+  appendTranscript(latestSegments);
   renderNoteSections(
     normalizeResult(meeting.summary ?? meeting.generatedNotes),
     false,
@@ -1732,42 +1733,80 @@ function resetMeters(): void {
   floatMic.style.width = "0%";
   floatSystem.style.width = "0%";
 }
-function renderTranscript(
-  latest: TranscriptSegment | undefined,
-  all: TranscriptSegment[],
+/** How many rows are currently in the transcript list. */
+let renderedSegments = 0;
+
+function transcriptRow(segment: TranscriptSegment): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "transcript-segment";
+
+  const seconds = Math.floor(segment.startMs / 1000);
+  const stamp = document.createElement("time");
+  stamp.dateTime = `PT${seconds}S`;
+  stamp.textContent = formatDuration(seconds);
+
+  const body = document.createElement("div");
+  const source = document.createElement("span");
+  source.className = "transcript-speaker";
+  source.textContent = "Room audio";
+  const text = document.createElement("p");
+  text.textContent = segment.text;
+  body.append(source, text);
+
+  row.append(stamp, body);
+  return row;
+}
+
+/**
+ * Replaces the transcript with an empty state (used before capture starts).
+ */
+function renderTranscriptPlaceholder(message: string): void {
+  transcriptOutput.textContent = "";
+  renderedSegments = 0;
+  const empty = document.createElement("p");
+  empty.className = "transcript-empty";
+  empty.textContent = message;
+  transcriptOutput.append(empty);
+}
+
+/**
+ * Shows the empty state before any words arrive (or on opening a saved
+ * meeting with no transcript).
+ */
+function resetTranscript(
   emptyMessage = "Your conversation will appear here once capture starts.",
 ): void {
   transcriptOutput.textContent = "";
-  if (!all.length) {
-    const empty = document.createElement("p");
-    empty.className = "transcript-empty";
-    empty.textContent = emptyMessage;
-    transcriptOutput.append(empty);
-    return;
+  renderedSegments = 0;
+  if (!emptyMessage) return;
+  const empty = document.createElement("p");
+  empty.className = "transcript-empty";
+  empty.textContent = emptyMessage;
+  transcriptOutput.append(empty);
+}
+
+/**
+ * Appends whatever is new and never rewrites what is already on screen.
+ *
+ * The list used to be rebuilt from the array on every segment, which made text
+ * appear to be "replaced" while speaking, and the rebuild also reset the scroll
+ * position — which turned auto-scroll off by itself.
+ */
+function appendTranscript(all: TranscriptSegment[]): void {
+  if (all.length < renderedSegments) {
+    /* The list was reset (new meeting, or a different one was opened). */
+    resetTranscript("");
+    renderedSegments = 0;
   }
-  let seconds = 0;
-  for (const segment of all) {
-    seconds = Math.floor(segment.startMs / 1000);
-    const row = document.createElement("div");
-    row.className = "transcript-segment";
+  const placeholder = transcriptOutput.querySelector(".transcript-empty");
+  if (placeholder) placeholder.remove();
 
-    const stamp = document.createElement("time");
-    stamp.dateTime = `PT${seconds}S`;
-    stamp.textContent = formatDuration(seconds);
+  for (let index = renderedSegments; index < all.length; index += 1)
+    transcriptOutput.append(transcriptRow(all[index]));
+  renderedSegments = all.length;
 
-    const body = document.createElement("div");
-    const source = document.createElement("span");
-    source.className = "transcript-speaker";
-    source.textContent = "Room audio";
-    const text = document.createElement("p");
-    text.textContent = segment.text;
-    body.append(source, text);
-
-    row.append(stamp, body);
-    transcriptOutput.append(row);
-  }
   applyTranscriptFilter();
-  if (latest && autoscrollEnabled) scrollTranscriptToEnd();
+  if (autoscrollEnabled) scrollTranscriptToEnd();
 }
 
 /** Builds the local (Whisper) engine, loading the model if needed. */
@@ -1809,8 +1848,7 @@ async function fallBackToLocalTranscription(message: string): Promise<void> {
       },
       onSegment: (segment, all) => {
         latestSegments = all;
-        clearInterimTranscript();
-        renderTranscript(segment, all);
+        appendTranscript(all);
         void updateIntelligence();
         void persistCurrentMeeting();
       },
@@ -1838,35 +1876,6 @@ async function fallBackToLocalTranscription(message: string): Promise<void> {
   } finally {
     recovering = false;
   }
-}
-
-/** Live, not-yet-final words from a streaming engine. */
-function renderInterimTranscript(text: string): void {
-  const trimmed = text.trim();
-  const existing = transcriptOutput.querySelector(".transcript-interim");
-  if (!trimmed) {
-    existing?.remove();
-    return;
-  }
-  const row = (existing as HTMLElement | null) ?? document.createElement("div");
-  row.className = "transcript-segment transcript-interim";
-  const stamp = document.createElement("time");
-  stamp.textContent = "live";
-  const body = document.createElement("div");
-  const source = document.createElement("span");
-  source.className = "transcript-speaker";
-  source.textContent = "Room audio";
-  const paragraph = document.createElement("p");
-  paragraph.textContent = trimmed;
-  body.append(source, paragraph);
-  row.textContent = "";
-  row.append(stamp, body);
-  if (!existing) transcriptOutput.append(row);
-  if (autoscrollEnabled) scrollTranscriptToEnd();
-}
-
-function clearInterimTranscript(): void {
-  transcriptOutput.querySelector(".transcript-interim")?.remove();
 }
 
 /* ============================================================
@@ -1920,7 +1929,15 @@ function syncAutoscrollButton(): void {
   transcriptAutoscroll.setAttribute("aria-pressed", String(autoscrollEnabled));
 }
 
+/**
+ * Auto-scroll only yields to a deliberate scroll. Programmatic scrolling and
+ * re-layout also fire `scroll`, which used to switch it off by itself within
+ * seconds of a meeting starting.
+ */
+let ignoreScrollUntil = 0;
+
 function scrollTranscriptToEnd(): void {
+  ignoreScrollUntil = performance.now() + 400;
   transcriptList.scrollTop = transcriptList.scrollHeight;
 }
 

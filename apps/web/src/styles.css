@@ -1981,23 +1981,6 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   border-bottom: 0;
 }
 
-/* Live words from a streaming engine: visibly provisional. */
-.transcript-interim {
-  opacity: 0.72;
-  border-bottom: 0;
-  animation: none;
-}
-
-.transcript-interim p {
-  font-style: italic;
-}
-
-.transcript-interim time {
-  color: var(--accent-dark);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .transcript-segment time {
   padding-top: 2px;
   color: var(--text-muted);
