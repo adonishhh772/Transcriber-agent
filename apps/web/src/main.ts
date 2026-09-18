@@ -156,8 +156,6 @@ const modelRowLabel = $("model-row-label");
 const backendHint = $("backend-hint");
 const deepseekState = $("deepseek-state");
 const aiSettings = $("ai-settings");
-const aiSettingsOffNote = $("ai-settings-off-note");
-const aiReveal = $("ai-reveal") as HTMLButtonElement;
 const testAudioButton = $("test-audio") as HTMLButtonElement;
 const liveControls = $("live-controls");
 const liveLabel = $("live-label");
@@ -226,6 +224,7 @@ const settingsTabs = Array.from(
   document.querySelectorAll<HTMLButtonElement>("[data-settings-tab]"),
 );
 const asrPanel = $("asr-settings");
+const notesTab = $("tab-notes") as HTMLButtonElement;
 const aiKeyLabel = $("ai-key-label");
 const aiKeyToggle = $("ai-key-toggle") as HTMLButtonElement;
 const aiProviderSummary = $("ai-provider-summary");
@@ -549,13 +548,27 @@ for (const trigger of document.querySelectorAll<HTMLButtonElement>(
   });
 }
 
-railToggle.addEventListener("click", () => {
-  const collapsed = rail.classList.toggle("is-collapsed");
+/** Sidebar width preference, remembered across visits. */
+const RAIL_KEY = "gather.rail.collapsed";
+
+function applyRailCollapsed(collapsed: boolean): void {
+  rail.classList.toggle("is-collapsed", collapsed);
   railToggle.setAttribute("aria-expanded", String(!collapsed));
   railToggle.setAttribute(
     "aria-label",
     collapsed ? "Expand navigation" : "Collapse navigation",
   );
+  railToggle.title = collapsed ? "Expand navigation" : "Collapse navigation";
+}
+
+railToggle.addEventListener("click", () => {
+  const collapsed = !rail.classList.contains("is-collapsed");
+  applyRailCollapsed(collapsed);
+  try {
+    localStorage.setItem(RAIL_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* the choice simply does not persist */
+  }
 });
 
 for (const tab of panelTabs) {
@@ -898,9 +911,15 @@ apiToken.addEventListener("change", () => {
 aiTest.addEventListener("click", () => void runConnectionTest());
 
 /* One click from "local-only" to a usable key field. */
-aiReveal.addEventListener("click", () => {
-  privacyMode.checked = false;
-  syncPrivacyState();
+/* The preparation screen's "Add key" chip is the way into the notes settings
+   now that the AI notes tab only exists while local-only mode is off. */
+deepseekState.addEventListener("click", () => {
+  if (privacyMode.checked) {
+    privacyMode.checked = false;
+    syncPrivacyState();
+    showToast("Local-only mode off: the notes key sends text to your provider");
+  }
+  setView("settings");
   setSettingsTab("notes");
   aiKey.focus();
   setAiStatus("Paste your key, then use Test connection.");
@@ -921,6 +940,11 @@ syncPrivacyState();
 syncPrepareModel();
 syncAiSettingsUi();
 syncAsrSettingsUi();
+try {
+  applyRailCollapsed(localStorage.getItem(RAIL_KEY) === "1");
+} catch {
+  applyRailCollapsed(false);
+}
 /* A key restored from this session means the user already chose a cloud
    engine; do not leave it blocked behind the local-only default. */
 allowCloudAudioWhenChosen();
@@ -2148,17 +2172,14 @@ function setSettingsTab(tab: "stt" | "notes"): void {
 
 function applySettingsTab(): void {
   const notesUsable = !privacyMode.checked;
-  asrPanel.classList.toggle("hidden", settingsTab !== "stt");
-  aiSettings.classList.toggle(
-    "hidden",
-    settingsTab !== "notes" || !notesUsable,
-  );
-  aiSettingsOffNote.classList.toggle(
-    "hidden",
-    settingsTab !== "notes" || notesUsable,
-  );
+  /* The AI notes tab only exists when local-only mode is off. Turning that mode
+     on while the tab is open falls back to the speech-to-text tab. */
+  notesTab.classList.toggle("hidden", !notesUsable);
+  const tab = settingsTab === "notes" && !notesUsable ? "stt" : settingsTab;
+  asrPanel.classList.toggle("hidden", tab !== "stt");
+  aiSettings.classList.toggle("hidden", tab !== "notes" || !notesUsable);
   for (const button of settingsTabs) {
-    const active = button.dataset.settingsTab === settingsTab;
+    const active = button.dataset.settingsTab === tab;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-selected", String(active));
   }

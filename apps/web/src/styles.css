@@ -146,6 +146,15 @@ dt {
   flex: 0 0 226px;
   width: 226px;
   flex-direction: column;
+  /* Pinned to the viewport: on a long page the navigation used to scroll away
+     with the content, leaving no way to change view without scrolling back. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  max-height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 22px 14px 16px;
   border-right: 1px solid var(--border);
   background: var(--rail);
@@ -319,8 +328,15 @@ dt {
   justify-content: center;
 }
 
+/* Stack the mark over the toggle when collapsed: hiding the toggle made the
+   collapsed sidebar impossible to reopen. */
+.rail.is-collapsed .rail-head {
+  flex-direction: column;
+  gap: 8px;
+}
+
 .rail.is-collapsed .rail-toggle {
-  display: none;
+  margin-left: 0;
 }
 
 /* ============================================================
@@ -1117,7 +1133,8 @@ dt {
 
 .advanced input,
 .ai-settings input,
-.asr-settings input {
+.asr-settings input,
+.vault-block input {
   padding: 8px 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
@@ -1133,7 +1150,8 @@ dt {
 
 .advanced input:focus,
 .ai-settings input:focus,
-.asr-settings input:focus {
+.asr-settings input:focus,
+.vault-block input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1162,13 +1180,15 @@ dt {
 }
 
 .ai-settings .field,
-.asr-settings .field {
+.asr-settings .field,
+.vault-block .field {
   display: grid;
   gap: 6px;
 }
 
 .ai-settings .field > label,
-.asr-settings .field > label {
+.asr-settings .field > label,
+.vault-block .field > label {
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 0.65rem;
