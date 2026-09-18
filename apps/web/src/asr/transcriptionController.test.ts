@@ -5,7 +5,7 @@
  * around it — buffer bookkeeping, window coverage, timestamp offsets and the
  * backpressure behaviour — without a browser, a worker or a model.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureStreams } from "../capture/browserCapture";
 import type { TranscriptSegment } from "../transcript/dedup";
 import { TranscriptionController } from "./transcriptionController";
@@ -23,6 +23,7 @@ const state = {
 function fakeClient(): WhisperClient {
   return {
     async load(): Promise<void> {},
+    async recover(): Promise<void> {},
     transcribe(samples: Float32Array, startMs: number, endMs: number) {
       state.calls.push({ startMs, endMs, samples: samples.length });
       return new Promise((resolve) => {
@@ -41,7 +42,7 @@ const SR = 16_000;
 /** Lets the controller's promise chain settle. */
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-function setup() {
+function setup(client: WhisperClient = fakeClient()) {
   const processor = {
     onaudioprocess: null as
       | ((event: { inputBuffer: { getChannelData: () => Float32Array } }) => void)
@@ -79,15 +80,21 @@ function setup() {
       onDiagnostics: (snapshot) => void diagnostics.push(snapshot),
       onError: (message) => void errors.push(message),
     },
-    fakeClient(),
+    client,
   );
-
   return {
     controller,
     segments,
     errors,
     diagnostics,
     capture: { audioContext: context, mixed: {} } as unknown as CaptureStreams,
+    /** Feeds a single audio block (for tests that drive their own clock). */
+    pushBlock(amplitude = 0.2) {
+      const block = new Float32Array(BLOCK).fill(amplitude);
+      processor.onaudioprocess?.({
+        inputBuffer: { getChannelData: () => block },
+      });
+    },
     /** Feeds n blocks of audio, releasing finished inferences as they appear. */
     async pump(blocks: number, amplitude = 0.2, release = true) {
       for (let index = 0; index < blocks; index += 1) {
@@ -216,5 +223,44 @@ describe("live transcription", () => {
     const afterSpeech = harness.diagnostics[harness.diagnostics.length - 1];
     expect(afterSpeech.transcribed).toBeGreaterThan(0);
     expect(afterSpeech.silentMs).toBe(0);
+  });
+});
+
+describe("stalled inference", () => {
+  it("abandons a stuck window, rebuilds the model and keeps transcribing", async () => {
+    vi.useFakeTimers();
+    const stalled = { calls: 0, recoveries: 0 };
+    const client = {
+      async load(): Promise<void> {},
+      async recover(): Promise<void> {
+        stalled.recoveries += 1;
+      },
+      transcribe() {
+        stalled.calls += 1;
+        return new Promise(() => {}); // never settles, like WebGPU on silence
+      },
+      dispose(): void {},
+    } as unknown as WhisperClient;
+
+    const harness = setup(client);
+    await harness.controller.start(harness.capture);
+
+    const feed = async (blocks: number) => {
+      for (let index = 0; index < blocks; index += 1) {
+        harness.pushBlock();
+        await vi.advanceTimersByTimeAsync(1);
+      }
+    };
+
+    await feed(11); // ~2.8s: the first window is handed to the model
+    expect(stalled.calls).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(stalled.recoveries).toBe(1);
+    expect(harness.errors.join(" ")).toMatch(/stalled/i);
+
+    await feed(40); // audio keeps coming after recovery
+    expect(stalled.calls).toBeGreaterThan(1);
+    vi.useRealTimers();
   });
 });

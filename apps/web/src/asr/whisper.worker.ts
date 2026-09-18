@@ -56,13 +56,17 @@ async function runTranscribe(
 ): Promise<void> {
   try {
     if (!loadedModel || disposed) throw new Error("Whisper model is not loaded");
+    const started = Date.now();
     const segment = await transcribeChunk(
       message.audio,
       message.startMs,
       message.endMs,
       message.language,
     );
-    if (segment) post({ type: "segment", id: message.id, segment });
+    post({ type: "timing", id: message.id, ms: Date.now() - started });
+    /* Always answer, even for a window with no words: the caller is waiting on
+       this id, and silence is the common case at the start of a meeting. */
+    post({ type: "segment", id: message.id, segment });
   } catch (error) {
     post({
       type: "error",

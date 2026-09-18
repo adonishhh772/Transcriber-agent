@@ -34,10 +34,11 @@ class FakeWorker {
 
   terminate() {}
 
-  /** Delivers a worker → client message. */
+  /** Delivers a worker → client message (both wiring styles). */
   emit(message: WhisperWorkerResponse) {
     for (const listener of [...this.listeners])
       listener({ data: message } as MessageEvent);
+    this.onmessage?.({ data: message } as MessageEvent);
   }
 
   crash(message: string) {
@@ -157,6 +158,36 @@ describe("WhisperClient.load", () => {
       backend: "wasm",
     });
     await expect(loading).resolves.toBeUndefined();
+  });
+
+  it("resolves a transcribe call even when the window had no speech", async () => {
+    /* The worker used to stay silent for an empty window, so the caller waited
+       for the watchdog and the transcript stalled at the start of a meeting. */
+    const client = new WhisperClient({ model: "Xenova/whisper-tiny.en" });
+    const loading = client.load();
+    await vi.waitFor(() => expect(lastWorker().posted).toHaveLength(1));
+    lastWorker().emit({
+      type: "loaded",
+      model: "Xenova/whisper-tiny.en",
+      backend: "wasm",
+    });
+    await loading;
+
+    const audio = new Float32Array(16000);
+    const pending = client.transcribe(audio, 0, 1000);
+    await vi.waitFor(() =>
+      expect(lastWorker().posted.some((m) => m.type === "transcribe")).toBe(
+        true,
+      ),
+    );
+    const sent = lastWorker().posted.find((m) => m.type === "transcribe") as
+      | { id: number }
+      | undefined;
+    expect(sent).toBeDefined();
+    const id = sent?.id ?? 0;
+    lastWorker().emit({ type: "timing", id, ms: 1200 });
+    lastWorker().emit({ type: "segment", id, segment: null });
+    await expect(pending).resolves.toBeNull();
   });
 
   it("honours a forced CPU backend without probing the GPU", async () => {

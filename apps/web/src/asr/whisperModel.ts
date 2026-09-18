@@ -53,9 +53,22 @@ export function modelAcceptsLanguageOption(
 export type WhisperChunkOptions = {
   return_timestamps: true;
   chunk_length_s: number;
+  max_new_tokens: number;
   language?: string;
   task?: "transcribe";
 };
+
+/**
+ * Token budget for one window.
+ *
+ * Whisper can fall into a timestamp loop on quiet or noisy audio and keep
+ * decoding until its 448-token limit: on WebGPU that turned a 2.5s window into
+ * 30s+ of work which blocked every later window. Speech needs roughly two
+ * tokens per word, so a few tokens per second of audio is generous.
+ */
+export function maxTokensForWindow(audioSeconds: number): number {
+  return Math.max(32, Math.round(audioSeconds * 8));
+}
 
 /**
  * Builds the transformers.js pipeline options for one audio chunk.
@@ -70,6 +83,7 @@ export function buildWhisperChunkOptions(input: {
   const options: WhisperChunkOptions = {
     return_timestamps: true,
     chunk_length_s: Math.max(1, input.audioSeconds),
+    max_new_tokens: maxTokensForWindow(input.audioSeconds),
   };
   const language = input.language?.trim();
   if (language && input.acceptsLanguage) {

@@ -237,6 +237,16 @@ let modelState: ModelState = "idle";
 let modelError = "";
 let modelPercent = 0;
 let modelReloadTimer: number | null = null;
+/** Backend the loaded client actually used. */
+let activeBackend: "webgpu" | "wasm" = "wasm";
+/** Model time for the last window, separated from queue wait. */
+let modelWindowMs = 0;
+
+/**
+ * The first inference compiles kernels and measured 17-30s in the browser, so
+ * the budget has to cover that or the warm-up is pointless.
+ */
+const WARMUP_TIMEOUT_MS = 90_000;
 
 function activeModelId(): string {
   return modelInput.value.trim() || DEFAULT_WHISPER_MODEL;
@@ -250,9 +260,11 @@ const BACKEND_KEY = "gather.transcription.backend";
 
 function loadBackendMode(): "auto" | "wasm" {
   try {
-    return localStorage.getItem(BACKEND_KEY) === "wasm" ? "wasm" : "auto";
+    /* CPU is the default: the WebGPU path stalled for 30s+ on quiet audio on a
+       real GPU, which is worse than being a little slower but reliable. */
+    return localStorage.getItem(BACKEND_KEY) === "auto" ? "auto" : "wasm";
   } catch {
-    return "auto";
+    return "wasm";
   }
 }
 
@@ -265,6 +277,7 @@ function saveBackendMode(value: "auto" | "wasm"): void {
 }
 
 function handleBackend(backend: "webgpu" | "wasm"): void {
+  activeBackend = backend;
   backendElement.textContent = `Backend: ${backend.toUpperCase()}`;
   backendHint.textContent =
     backend === "webgpu"
@@ -315,6 +328,9 @@ async function loadWhisperModel(
       syncModelState();
     },
     onBackend: handleBackend,
+    onTiming: (ms) => {
+      modelWindowMs = ms;
+    },
     onError: (message) => {
       modelError = message;
       modelState = "error";
@@ -323,9 +339,15 @@ async function loadWhisperModel(
   });
   try {
     await client.load();
+    /* The model is usable now: never hold the user at a "warming up" screen.
+       The first inference compiles kernels, so it runs in the background —
+       usually long before a meeting starts — and if the user starts first the
+       worker simply finishes it before the first real window. */
     whisperClient = client;
     modelState = "ready";
+    modelError = "";
     syncModelState();
+    void client.warmUp(WARMUP_TIMEOUT_MS).catch(() => undefined);
     return client;
   } catch (error) {
     client.dispose();
@@ -752,6 +774,7 @@ async function handleStart(): Promise<void> {
     throttledWarned = false;
     lastDiagnosticsAt = 0;
     lastSnapshot = null;
+    modelWindowMs = 0;
     lastRollingAt = 0;
     rollingInFlight = false;
     syncAiStatusSummary();
@@ -1031,7 +1054,12 @@ function handleTranscriptionDiagnostics(
   transcriptionLevel.textContent = level;
   transcriptionWindows.textContent = `${snapshot.transcribed} transcribed · ${snapshot.skippedSilent} too quiet`;
   const liveFor = startedAt === null ? 0 : Date.now() - startedAt;
-  const parts = [`input ${level}`];
+  const parts = [
+    `input ${level}`,
+    `heard ${(snapshot.receivedMs / 1000).toFixed(0)}s`,
+  ];
+  if (modelWindowMs > 0)
+    parts.push(`model ${(modelWindowMs / 1000).toFixed(1)}s/window`);
   if (snapshot.transcribed > 0)
     parts.push(`${snapshot.transcribed} window${snapshot.transcribed === 1 ? "" : "s"}`);
   if (snapshot.inFlightMs > 0)
@@ -1426,8 +1454,10 @@ function updateMeters(): void {
  */
 function syncTranscriptionStatus(mixedLevel: number): void {
   if (startedAt === null) return;
-  if (Date.now() - lastDiagnosticsAt < 3000) return;
   const level = formatLevelPercent(mixedLevel);
+  const heardMs = lastSnapshot?.receivedMs ?? 0;
+  const heard = `heard ${(heardMs / 1000).toFixed(0)}s`;
+  if (Date.now() - lastDiagnosticsAt < 3000) return;
   if (lastSnapshot) {
     const working =
       lastSnapshot.inFlightMs > 0
@@ -1435,15 +1465,17 @@ function syncTranscriptionStatus(mixedLevel: number): void {
         : 0;
     transcriptionStatus.textContent =
       working > 0
-        ? `input ${level} · ${lastSnapshot.transcribed} windows · working ${(working / 1000).toFixed(1)}s`
-        : `input ${level} · ${lastSnapshot.transcribed} windows · last result ${(lastSnapshot.sinceInferenceMs / 1000).toFixed(0)}s ago`;
+        ? `input ${level} · ${heard} · ${lastSnapshot.transcribed} windows · working ${(working / 1000).toFixed(1)}s`
+        : `input ${level} · ${heard} · ${lastSnapshot.transcribed} windows · last result ${(lastSnapshot.sinceInferenceMs / 1000).toFixed(0)}s ago`;
     return;
   }
   transcriptionStatus.textContent = `input ${level} · no windows yet`;
   if (Date.now() - startedAt < 12_000 || noWindowsWarned) return;
   noWindowsWarned = true;
   showError(
-    `The microphone is registering audio (${level}) but no audio is reaching the transcriber. Reload the page and start a new meeting; if it repeats the capture path needs fixing.`,
+    heardMs === 0
+      ? `No audio is reaching the transcriber at all (input level ${level}). The microphone or display audio track is not delivering samples — reload the page and start a new meeting.`
+      : `The microphone is registering audio (${level}) but no audio is reaching the transcriber. Reload the page and start a new meeting; if it repeats the capture path needs fixing.`,
   );
 }
 function readLevel(analyser: AnalyserNode): number {
