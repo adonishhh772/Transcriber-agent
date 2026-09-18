@@ -588,6 +588,13 @@ transcriptList.addEventListener("keydown", (event) => {
   if (["ArrowUp", "PageUp", "Home"].includes(event.key))
     pauseAutoscrollOnUserScroll();
 });
+/* Dragging the scrollbar is neither a wheel nor a touch event, so a scroll
+   event still counts — but ours must not, or auto-scroll would switch itself
+   off the moment it scrolled. */
+transcriptList.addEventListener("scroll", () => {
+  if (pinningToEnd) return;
+  pauseAutoscrollOnUserScroll();
+});
 transcriptCopy.addEventListener("click", () => {
   copyText(
     latestSegments.map((segment) => segment.text).join("\n"),
@@ -1946,8 +1953,15 @@ function syncAutoscrollButton(): void {
   transcriptAutoscroll.setAttribute("aria-pressed", String(autoscrollEnabled));
 }
 
+/** True while we are scrolling the list ourselves. */
+let pinningToEnd = false;
+
 function scrollTranscriptToEnd(): void {
+  pinningToEnd = true;
   transcriptList.scrollTop = transcriptList.scrollHeight;
+  requestAnimationFrame(() => {
+    pinningToEnd = false;
+  });
 }
 
 function applyTranscriptFilter(): void {
