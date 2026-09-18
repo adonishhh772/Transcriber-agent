@@ -6,9 +6,11 @@ import {
   endpointFor,
   isConfigured,
   requestNotes,
+  supportsVision,
+  visionModelFor,
   type AiConfig,
 } from "./client";
-import { getProvider } from "./providers";
+import { PROVIDERS, getProvider } from "./providers";
 
 /**
  * The client calls `window.setTimeout`, which does not exist in the node test
@@ -184,6 +186,58 @@ describe("screen reading", () => {
     await expect(
       describeScreen(config({ provider: "deepseek" }), "prompt", "http://x/y.png"),
     ).rejects.toThrow(/base64/i);
+  });
+});
+
+describe("vision model resolution", () => {
+  it("has a vision model for every notes provider except the custom server", () => {
+    const unsupported = PROVIDERS.filter(
+      (provider) => !supportsVision(provider),
+    ).map((provider) => provider.id);
+    expect(unsupported).toEqual(["custom"]);
+  });
+
+  it("never depends on the notes model being able to see", () => {
+    /* These are the models the app would otherwise send an image to. */
+    expect(
+      visionModelFor(
+        getProvider("deepseek"),
+        config({ model: "deepseek-reasoner" }),
+      ),
+    ).toBe("deepseek-flash");
+    expect(
+      visionModelFor(
+        getProvider("openai"),
+        config({ provider: "openai", model: "gpt-4.1" }),
+      ),
+    ).toBe("gpt-4o-mini");
+    expect(
+      visionModelFor(
+        getProvider("anthropic"),
+        config({ provider: "anthropic", model: "claude-sonnet-4-5" }),
+      ),
+    ).toBe("claude-haiku-4-5");
+    expect(
+      visionModelFor(
+        getProvider("gemini"),
+        config({ provider: "gemini", model: "gemini-2.5-pro" }),
+      ),
+    ).toBe("gemini-2.5-flash");
+    expect(
+      visionModelFor(
+        getProvider("openrouter"),
+        config({ provider: "openrouter", model: "anthropic/claude-haiku-4.5" }),
+      ),
+    ).toBe("openai/gpt-4o-mini");
+  });
+
+  it("lets an explicit vision model win when one is configured", () => {
+    expect(
+      visionModelFor(
+        getProvider("deepseek"),
+        config({ visionModel: "deepseek-vl2" }),
+      ),
+    ).toBe("deepseek-vl2");
   });
 });
 

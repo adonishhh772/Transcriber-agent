@@ -54,6 +54,25 @@ the display track that also carries the meeting audio.
   limited to the shared window"*, or, if the whole monitor was shared, a warning
   that everything on it — other windows included — is visible to the model.
 
+## Which model reads the screen
+
+Screen reading uses a **separate vision model per provider**, never the notes
+model — that is what makes it work with any notes model, including text-only ones
+like `deepseek-chat` and `deepseek-reasoner`. The settings hint names the one in
+use, and the notes model is only mentioned when it differs:
+
+| AI provider | Vision model | Wire |
+| --- | --- | --- |
+| DeepSeek | `deepseek-flash` | `image_url` block |
+| OpenAI | `gpt-4o-mini` | `image_url` block |
+| Claude (Anthropic) | `claude-haiku-4-5` | Anthropic `image` block |
+| Google Gemini | `gemini-2.5-flash` | `inline_data` part |
+| OpenRouter | `openai/gpt-4o-mini` | `image_url` block |
+| Custom server | — | screens are skipped, with the reason shown in Settings |
+
+Local-only mode refuses to read screens at all, because a screen description can
+only come from a cloud vision model.
+
 If you need a hard guarantee that only the meeting is read, pick that one window;
 the app cannot restrict the picker further, because the browser deliberately
 leaves the choice to the user.

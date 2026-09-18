@@ -40,6 +40,7 @@ import {
   requestNotes,
   supportsVision,
   testConnection,
+  visionModelFor,
   type AiConfig,
 } from "./intelligence/client";
 import { buildAskPrompt, type AskTurn } from "./intelligence/ask";
@@ -368,15 +369,42 @@ function syncAsrSettingsUi(): void {
   recordAudioToggle.checked = settings.recordAudio;
   recordAudioToggle.disabled = !recordingSupported();
   readScreenToggle.checked = settings.readScreen;
-  if (!screenStatus.textContent)
-    screenStatus.textContent = settings.readScreen
-      ? "Screens are read by your AI provider's vision model while a meeting runs."
-      : "Shared screens are ignored; the notes use speech only.";
+  syncScreenHint();
   asrSummary.textContent = describeAsrProvider(settings, {
     localOnly: privacyMode.checked,
     deepgramKey: key,
   });
   syncModelState();
+}
+
+/**
+ * Names the model that will actually read the screen.
+ *
+ * Screen reading picks its own vision model per provider, so it keeps working
+ * whatever the notes model is — `deepseek-chat` cannot see an image, but
+ * `deepseek-flash` can, and the notes model is never asked to. Saying which one
+ * is used is the honest answer to "can my model read the screen?".
+ */
+function syncScreenHint(): void {
+  if (!screenStatus) return;
+  if (!currentAsrSettings().readScreen) {
+    screenStatus.textContent =
+      "Shared screens are ignored; the notes use speech only.";
+    return;
+  }
+  const config = currentAiConfig();
+  const provider = getProvider(config.provider);
+  if (!supportsVision(provider)) {
+    screenStatus.textContent = `${provider.label} cannot read images, so screens are skipped. Pick another AI provider to read slides and documents.`;
+    return;
+  }
+  const model = visionModelFor(provider, config);
+  const notesModel = config.model || provider.defaultModel;
+  const base = `Screens are read by ${model} every ~25 seconds while a meeting runs.`;
+  screenStatus.textContent =
+    notesModel === model
+      ? base
+      : `${base} Your notes model (${notesModel}) does not need to support images.`;
 }
 
 function syncAsrProviderFromCapture(): void {
@@ -841,9 +869,7 @@ readScreenToggle.addEventListener("change", () => {
     screenReader?.stop();
     screenReader = null;
   }
-  screenStatus.textContent = readScreenToggle.checked
-    ? "Screens are read by your AI provider's vision model while a meeting runs."
-    : "Shared screens are ignored; the notes use speech only.";
+  syncScreenHint();
 });
 
 /* ---- AI notes settings ---------------------------------------------- */
@@ -1298,7 +1324,8 @@ async function handleStop(message?: string): Promise<void> {
   const recording = currentRecorder ? await currentRecorder.stop() : null;
   screenReader?.stop();
   screenReader = null;
-  if (screenStatus) screenStatus.textContent = "";
+  /* Back to the resting hint: which model reads the screen, or why none does. */
+  syncScreenHint();
   if (currentTranscription) await currentTranscription.stop();
   const currentCapture = capture;
   capture = null;
@@ -2779,6 +2806,8 @@ function syncAiSettingsUi(): void {
   }
   syncAiStatusSummary();
   syncAskState();
+  /* Switching provider changes which vision model reads the screen. */
+  syncScreenHint();
 }
 
 function setAiStatus(message: string, tone: "ok" | "error" | "" = ""): void {
