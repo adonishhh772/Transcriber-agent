@@ -208,7 +208,7 @@ describe("answerQuestion", () => {
        schema it was never given. */
     expect(body.response_format).toBeUndefined();
     expect(body.messages[0].role).toBe("system");
-    expect(body.messages[0].content).toMatch(/only from the material/);
+    expect(body.messages[0].content).toMatch(/transcript is the record/);
     expect(body.messages[1].content).toContain("When is the launch?");
   });
 

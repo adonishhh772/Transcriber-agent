@@ -49,6 +49,7 @@ import {
 } from "./intelligence/activity";
 import {
   formatActionItem,
+  formatClock,
   hasNotes,
   normalizeResult,
   type IntelligenceResult,
@@ -1354,7 +1355,7 @@ async function finaliseNotes(): Promise<void> {
   notesSkeleton.classList.remove("hidden");
   try {
     const result = await requestNotes(currentAiConfig(), {
-      transcript: transcriptText(),
+      transcript: fullTranscript(),
       sessionId,
       final: true,
       screenNotes: recentScreenNotes(),
@@ -1518,10 +1519,26 @@ function handleTranscriptionDiagnostics(
   }
 }
 
-function transcriptText(): string {  return latestSegments
+/** The recent transcript, for the throttled rolling pass. */
+function transcriptText(): string {
+  return latestSegments
     .slice(-100)
     .map((segment) => segment.text)
     .join(" ");
+}
+
+/**
+ * The whole transcript, timestamped.
+ *
+ * Anything that claims to read the meeting — the final notes and every question
+ * — has to see all of it. The rolling pass is the only caller that may work from
+ * the recent tail, and that is a cost decision, not a coverage one.
+ */
+function fullTranscript(): string {
+  return latestSegments
+    .map((segment) => `[${formatClock(segment.startMs)}] ${segment.text.trim()}`)
+    .filter((line) => line.length > 7)
+    .join("\n");
 }
 
 /**
@@ -2380,7 +2397,7 @@ async function askAboutMeeting(): Promise<void> {
       config,
       buildAskPrompt(
         {
-          transcript: transcriptText(),
+          transcript: fullTranscript(),
           notes: normalizeResult(latestGeneratedNotes),
           screenNotes: recentScreenNotes(),
         },

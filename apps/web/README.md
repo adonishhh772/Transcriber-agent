@@ -77,7 +77,7 @@ Four views share one shell (navigation rail + main region):
 
 The **AI activity** tab is a changelog, not a snapshot: every AI update appends one timestamped line saying what moved — `Summary rewritten · 2 new key points`, `1 decision dropped`, `Final notes · unchanged · 3 key points, 1 action item` — alongside each shared-screen read, each question asked and any provider error. Consecutive identical failures collapse into one row whose timestamp stays current, so a provider that is down overnight cannot bury the log. The log is stored with the meeting and comes back when it is reopened.
 
-Questions and answers are stored with the meeting too, so a meeting can be re-opened and asked about days later; both the transcript and the notes are sent to the configured provider, nothing else.
+Questions and answers are stored with the meeting too, so a meeting can be re-opened and asked about days later. A question carries the **whole timestamped transcript**, and the notes are included only as a guide the model is told to overrule when the transcript disagrees with them — the transcript is the record, so an answer about minute 3 of a two-hour meeting is still grounded in what was actually said. The final notes pass reads the whole transcript for the same reason (the rolling pass is the only one that works from a recent tail, and that is a cost decision). Nothing but that material, plus the question, is sent to the configured provider.
 
 ## Real-time transcription with Deepgram
 
