@@ -105,8 +105,8 @@ export function buildPrompt(
   ].join("\n");
 }
 
-/** mm:ss for prompt-side timestamps. */
-function formatClock(ms: number): string {
+/** mm:ss for prompt-side and exported timestamps. */
+export function formatClock(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   const minutes = Math.floor(total / 60)
     .toString()

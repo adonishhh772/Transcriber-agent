@@ -7,7 +7,7 @@
  * decision nobody made is worse than no answer at all.
  */
 
-import type { IntelligenceResult } from "./notes";
+import { formatClock, type IntelligenceResult } from "./notes";
 
 export const ASK_SYSTEM_PROMPT =
   "You answer questions about one specific meeting, and only from the material " +
@@ -29,16 +29,6 @@ export type AskTurn = { question: string; answer: string };
 
 /** How many earlier turns are carried into a follow-up question. */
 export const ASK_HISTORY_TURNS = 4;
-
-/** mm:ss for prompt-side timestamps. */
-function formatClock(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(total / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (total % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-}
 
 /** Everything the model is allowed to use, laid out for a single question. */
 export function buildAskPrompt(
