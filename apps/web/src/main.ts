@@ -25,13 +25,16 @@ import {
 } from "./asr/asrSettings";
 import type { MeetingTranscriber } from "./asr/types";
 import { MeetingRecorder, formatBytes, recordingSupported } from "./audio/recorder";
+import { SCREEN_PROMPT, ScreenReader } from "./screen/screenReader";
 import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
 import {
   describeConfiguration,
+  describeScreen,
   isConfigured,
   requestNotes,
+  supportsVision,
   testConnection,
   type AiConfig,
 } from "./intelligence/client";
@@ -113,6 +116,8 @@ const deepgramKey = $("deepgram-key") as HTMLInputElement;
 const deepgramKeyToggle = $("deepgram-key-toggle") as HTMLButtonElement;
 const asrSummary = $("asr-summary");
 const recordAudioToggle = $("record-audio") as HTMLInputElement;
+const readScreenToggle = $("read-screen") as HTMLInputElement;
+const screenStatus = $("screen-status");
 /* Live bar (outside every view, so a running meeting stays visible) */
 const returnButton = $("return-button") as HTMLButtonElement;
 const floatAudioSize = $("float-audio-size");
@@ -297,6 +302,10 @@ let activeEngine: "local" | "deepgram" = "local";
 let recorder: MeetingRecorder | null = null;
 let audioUrl: string | null = null;
 let audioBytes = 0;
+/** Screen reading for the running meeting. */
+let screenReader: ScreenReader | null = null;
+let screenNotes: Array<{ atMs: number; text: string }> = [];
+let screenErrorShown = false;
 
 /* ---- Speech-to-text engine --------------------------------------------
    Local Whisper stays available always; Deepgram is used when it is selected
@@ -332,6 +341,11 @@ function syncAsrSettingsUi(): void {
   if (!cloud) setDeepgramStatus("");
   recordAudioToggle.checked = settings.recordAudio;
   recordAudioToggle.disabled = !recordingSupported();
+  readScreenToggle.checked = settings.readScreen;
+  if (!screenStatus.textContent)
+    screenStatus.textContent = settings.readScreen
+      ? "Screens are read by your AI provider's vision model while a meeting runs."
+      : "Shared screens are ignored; the notes use speech only.";
   asrSummary.textContent = describeAsrProvider(settings, {
     localOnly: privacyMode.checked,
     deepgramKey: key,
@@ -794,6 +808,19 @@ recordAudioToggle.addEventListener("change", () => {
   );
 });
 
+readScreenToggle.addEventListener("change", () => {
+  const settings = currentAsrSettings();
+  settings.readScreen = readScreenToggle.checked;
+  saveAsrSettings(settings);
+  if (!readScreenToggle.checked) {
+    screenReader?.stop();
+    screenReader = null;
+  }
+  screenStatus.textContent = readScreenToggle.checked
+    ? "Screens are read by your AI provider's vision model while a meeting runs."
+    : "Shared screens are ignored; the notes use speech only.";
+});
+
 /* ---- AI notes settings ---------------------------------------------- */
 for (const provider of PROVIDERS) {
   const option = document.createElement("option");
@@ -1159,6 +1186,7 @@ async function handleStart(): Promise<void> {
           ? "Transcribing locally"
           : "Transcribing locally · AI ready";
     startAudioRecording(result.streams);
+    startScreenReading(result.streams);
     capture.display
       .getVideoTracks()[0]
       ?.addEventListener(
@@ -1209,16 +1237,23 @@ async function handleStart(): Promise<void> {
   }
 }
 
+/** Recent screen descriptions, bounded so a long meeting cannot bloat a prompt. */
+function recentScreenNotes(): Array<{ atMs: number; text: string }> {
+  return screenNotes.slice(-10);
+}
+
 function handlePauseResume(): void {
   if (!transcription) return;
   if (pauseButton.textContent === "Pause") {
     transcription.pause();
+    screenReader?.pause();
     pauseButton.textContent = "Resume";
     livePill.textContent = "Paused";
     liveLabel.textContent = "Paused";
     liveControls.classList.add("is-paused");
   } else {
     transcription.resume();
+    screenReader?.resume();
     pauseButton.textContent = "Pause";
     livePill.textContent = "Transcribing locally";
     liveLabel.textContent = "Recording";
@@ -1234,6 +1269,9 @@ async function handleStop(message?: string): Promise<void> {
   const currentRecorder = recorder;
   recorder = null;
   const recording = currentRecorder ? await currentRecorder.stop() : null;
+  screenReader?.stop();
+  screenReader = null;
+  if (screenStatus) screenStatus.textContent = "";
   if (currentTranscription) await currentTranscription.stop();
   const currentCapture = capture;
   capture = null;
@@ -1294,6 +1332,7 @@ async function finaliseNotes(): Promise<void> {
       transcript: transcriptText(),
       sessionId,
       final: true,
+      screenNotes: recentScreenNotes(),
     });
     notesSkeleton.classList.add("hidden");
     applyNotes(result);
@@ -1337,6 +1376,7 @@ async function requestLatestIntelligence(): Promise<void> {
       transcript: transcriptText(),
       sessionId,
       final: false,
+      screenNotes: recentScreenNotes(),
     });
     applyNotes(result);
     deepseekState.textContent = "Connected";
@@ -1482,6 +1522,7 @@ async function persistCurrentMeeting(): Promise<void> {
     summary: latestSummary,
     updatedAt: Date.now(),
     hasAudio: audioBytes > 0,
+    screenNotes: screenNotes.length ? screenNotes : undefined,
   });
   await loadHistory();
 }
@@ -1661,6 +1702,8 @@ function openMeeting(id: string): void {
   recovering = true;
   renderTranscriptPlaceholder("");
   appendTranscript(latestSegments);
+  screenNotes = meeting.screenNotes ?? [];
+  for (const note of screenNotes) appendScreenNote(note);
   renderNoteSections(
     normalizeResult(meeting.summary ?? meeting.generatedNotes),
     false,
@@ -2067,6 +2110,91 @@ audioDownload.addEventListener("click", () => {
   anchor.download = `${meetingTitle.replace(/[^a-z0-9]+/gi, "-") || "meeting"}-audio.webm`;
   anchor.click();
 });
+
+/* ============================================================
+   Shared screen reading
+   ============================================================ */
+
+/** Starts reading the shared screen when a vision provider is configured. */
+function startScreenReading(streams: CaptureStreams): void {
+  screenNotes = [];
+  screenErrorShown = false;
+  if (screenStatus) screenStatus.textContent = "";
+  if (!currentAsrSettings().readScreen) return;
+  /* Local-only mode promises that nothing leaves this device. Screen text can
+     only come from a cloud vision model, so screens stay unread rather than
+     quietly breaking that promise. */
+  if (privacyMode.checked) {
+    if (screenStatus)
+      screenStatus.textContent =
+        "Local-only mode is on, so screens are not read. Turn it off to send them to your AI provider.";
+    return;
+  }
+
+  const config = currentAiConfig();
+  const provider = getProvider(config.provider);
+  if (!isConfigured(config)) {
+    if (screenStatus)
+      screenStatus.textContent =
+        "Add an AI provider key to read the shared screen.";
+    return;
+  }
+  if (!supportsVision(provider)) {
+    if (screenStatus)
+      screenStatus.textContent = `${provider.label} cannot read images; screens are skipped.`;
+    return;
+  }
+  if (streams.display.getVideoTracks().length === 0) return;
+
+  const reader = new ScreenReader({
+    describe: (dataUrl) =>
+      describeScreen(currentAiConfig(), SCREEN_PROMPT, dataUrl),
+    onSummary: (summary) => {
+      screenNotes.push(summary);
+      appendScreenNote(summary);
+      void updateIntelligence();
+      void persistCurrentMeeting();
+    },
+    onStatus: (status) => {
+      if (screenStatus) screenStatus.textContent = status;
+    },
+    onError: (message) => {
+      /* Once per meeting: a vision call failing every 25s would be noise. */
+      if (screenErrorShown) return;
+      screenErrorShown = true;
+      showError(`${message} Screen reading is off for this meeting.`);
+      screenReader?.stop();
+      screenReader = null;
+    },
+  });
+  if (!reader.start(streams.display)) {
+    showToast("Screen reading needs a shared screen. The transcript continues.");
+    return;
+  }
+  screenReader = reader;
+}
+
+function appendScreenNote(note: { atMs: number; text: string }): void {
+  const row = document.createElement("div");
+  row.className = "transcript-segment transcript-screen";
+  const stamp = document.createElement("time");
+  const seconds = Math.floor(note.atMs / 1000);
+  stamp.dateTime = `PT${seconds}S`;
+  stamp.textContent = formatDuration(seconds);
+  const body = document.createElement("div");
+  const source = document.createElement("span");
+  source.className = "transcript-speaker";
+  source.textContent = "Shared screen";
+  const text = document.createElement("p");
+  text.textContent = note.text;
+  body.append(source, text);
+  row.append(stamp, body);
+  const placeholder = transcriptOutput.querySelector(".transcript-empty");
+  if (placeholder) placeholder.remove();
+  transcriptOutput.append(row);
+  applyTranscriptFilter();
+  if (autoscrollEnabled) scrollTranscriptToEnd();
+}
 
 /* ============================================================
    Shell behaviour

@@ -19,6 +19,8 @@ export type AsrSettings = {
   localModel: string;
   /** Keep the mixed meeting audio so it can be replayed or downloaded. */
   recordAudio: boolean;
+  /** Read the shared screen with a vision model and feed the notes. */
+  readScreen: boolean;
 };
 
 const DEFAULTS: AsrSettings = {
@@ -27,6 +29,7 @@ const DEFAULTS: AsrSettings = {
   language: "en",
   localModel: "Xenova/whisper-tiny.en",
   recordAudio: true,
+  readScreen: true,
 };
 
 export const DEEPGRAM_MODELS = ["nova-3", "nova-2", "nova-2-general"];
@@ -49,6 +52,7 @@ export function loadAsrSettings(): AsrSettings {
       language: parsed.language?.trim() || DEFAULTS.language,
       localModel: parsed.localModel?.trim() || DEFAULTS.localModel,
       recordAudio: parsed.recordAudio !== false,
+      readScreen: parsed.readScreen !== false,
     };
   } catch {
     return { ...DEFAULTS };

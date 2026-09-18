@@ -12,6 +12,8 @@ export type MeetingRecord = {
   updatedAt: number;
   /** Set when meeting audio was saved under this id. */
   hasAudio?: boolean;
+  /** What the shared screen showed, in order. */
+  screenNotes?: Array<{ atMs: number; text: string }>;
 };
 
 /**

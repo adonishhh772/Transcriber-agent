@@ -38,6 +38,7 @@ describe("asr settings", () => {
       language: "en-GB",
       localModel: "Xenova/whisper-base",
       recordAudio: false,
+      readScreen: false,
     };
     saveAsrSettings(settings);
     expect(loadAsrSettings()).toEqual(settings);
@@ -51,6 +52,7 @@ describe("resolveAsrProvider", () => {
     language: "en",
     localModel: "Xenova/whisper-tiny.en",
     recordAudio: true,
+    readScreen: true,
   };
 
   it("uses Deepgram when a key is present", () => {

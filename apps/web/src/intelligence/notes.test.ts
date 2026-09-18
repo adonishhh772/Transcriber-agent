@@ -129,6 +129,21 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("Action items");
   });
 
+  it("includes what the shared screen showed, with timestamps", () => {
+    const prompt = buildPrompt("we agreed to ship on friday", true, [
+      { atMs: 65_000, text: "Roadmap slide: three quarters, Q3 marked done." },
+      { atMs: 130_000, text: "Budget table with twelve rows." },
+    ]);
+    expect(prompt).toContain("we agreed to ship on friday");
+    expect(prompt).toContain("shared screen");
+    expect(prompt).toContain("01:05: Roadmap slide: three quarters, Q3 marked done.");
+    expect(prompt).toContain("02:10: Budget table with twelve rows.");
+  });
+
+  it("leaves the prompt untouched when nothing was on screen", () => {
+    expect(buildPrompt("hello", false)).not.toContain("shared screen");
+  });
+
   it("uses lighter guidelines for rolling notes", () => {
     const prompt = buildPrompt("Short window.", false);
     expect(prompt).toContain("Recent transcript");

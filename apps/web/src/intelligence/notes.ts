@@ -63,7 +63,11 @@ export const SYSTEM_PROMPT =
   "Always return ONLY a single JSON object that matches the provided schema. " +
   "Prefer bullet/point-form phrasing, avoid repetition, and extract concrete actions.";
 
-export function buildPrompt(transcript: string, final: boolean): string {
+export function buildPrompt(
+  transcript: string,
+  final: boolean,
+  screenNotes: Array<{ atMs: number; text: string }> = [],
+): string {
   const guidelines = final
     ? [
         "- Title: at most 200 characters, plain text.",
@@ -79,9 +83,19 @@ export function buildPrompt(transcript: string, final: boolean): string {
         "- Decisions and action items only when stated or clearly implied.",
         "- Questions: what was left unresolved.",
       ];
+  const screenSection = screenNotes.length
+    ? [
+        "",
+        "What was on the shared screen, in order (describe these as part of the meeting; do not invent anything beyond them):",
+        ...screenNotes.map(
+          (note) => `- ${formatClock(note.atMs)}: ${note.text}`,
+        ),
+      ]
+    : [];
   return [
     `${final ? "Full" : "Recent"} transcript (ordered, lightly cleaned):`,
     transcript,
+    ...screenSection,
     "",
     "Schema (respond with JSON matching this):",
     JSON.stringify(RESPONSE_SCHEMA),
@@ -89,6 +103,16 @@ export function buildPrompt(transcript: string, final: boolean): string {
     "Guidelines:",
     ...guidelines,
   ].join("\n");
+}
+
+/** mm:ss for prompt-side timestamps. */
+function formatClock(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60)
+    .toString()
+    .padStart(2, "0");
+  const seconds = (total % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
 /* ---------------------------------------------------------------------------

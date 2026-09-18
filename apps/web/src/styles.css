@@ -2012,6 +2012,19 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   border-bottom: 0;
 }
 
+/* What the shared screen showed: visually separate from speech. */
+.transcript-screen {
+  padding-left: 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--surface-secondary);
+}
+
+.transcript-screen .transcript-speaker {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .transcript-segment time {
   padding-top: 2px;
   color: var(--text-muted);

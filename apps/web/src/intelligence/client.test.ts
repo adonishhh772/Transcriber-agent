@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   describeConfiguration,
+  describeScreen,
   endpointFor,
   isConfigured,
   requestNotes,
@@ -107,6 +108,81 @@ describe("endpointFor", () => {
         "https://x.openai.azure.com/openai/deployments/d/chat/completions",
       ),
     ).toBe("https://x.openai.azure.com/openai/deployments/d/chat/completions");
+  });
+});
+
+describe("screen reading", () => {
+  it("sends the frame to DeepSeek's vision model, not the notes model", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        choices: [{ message: { content: "A slide titled Roadmap." } }],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const text = await describeScreen(
+      config({ provider: "deepseek", model: "deepseek-chat" }),
+      "What is on screen?",
+      "data:image/jpeg;base64,AAAA",
+    );
+
+    expect(text).toBe("A slide titled Roadmap.");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.deepseek.com/chat/completions");
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe("deepseek-flash");
+    const [, image] = body.messages[0].content;
+    expect(image.type).toBe("image_url");
+    expect(image.image_url.url).toBe("data:image/jpeg;base64,AAAA");
+    /* `low` keeps the frame at 512x512: cheap, and enough to read a slide. */
+    expect(image.image_url.detail).toBe("low");
+    expect(body.response_format).toBeUndefined();
+  });
+
+  it("uses each provider's own image block", async () => {
+    const geminiFetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        candidates: [{ content: { parts: [{ text: "A chart." }] } }],
+      }),
+    );
+    vi.stubGlobal("fetch", geminiFetch);
+    expect(
+      await describeScreen(
+        config({ provider: "gemini", apiKey: "AIza-test" }),
+        "prompt",
+        "data:image/png;base64,BBBB",
+      ),
+    ).toBe("A chart.");
+    const geminiBody = JSON.parse(geminiFetch.mock.calls[0][1].body);
+    expect(geminiBody.contents[0].parts[1].inline_data).toEqual({
+      mime_type: "image/png",
+      data: "BBBB",
+    });
+
+    const claudeFetch = vi.fn().mockResolvedValue(
+      jsonResponse({ content: [{ type: "text", text: "A table." }] }),
+    );
+    vi.stubGlobal("fetch", claudeFetch);
+    expect(
+      await describeScreen(
+        config({ provider: "anthropic" }),
+        "prompt",
+        "data:image/jpeg;base64,CCCC",
+      ),
+    ).toBe("A table.");
+    const claudeBody = JSON.parse(claudeFetch.mock.calls[0][1].body);
+    expect(claudeBody.messages[0].content[1].source).toEqual({
+      type: "base64",
+      media_type: "image/jpeg",
+      data: "CCCC",
+    });
+  });
+
+  it("refuses a frame that is not a base64 image", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(
+      describeScreen(config({ provider: "deepseek" }), "prompt", "http://x/y.png"),
+    ).rejects.toThrow(/base64/i);
   });
 });
 

@@ -18,7 +18,6 @@ import {
   type ProviderDefinition,
   type ProviderId,
 } from "./providers";
-
 export type AiConfig = {
   provider: ProviderId;
   model: string;
@@ -29,12 +28,16 @@ export type AiConfig = {
   baseUrl: string;
   /** Custom provider only. */
   serverToken: string;
+  /** Optional vision-model override used when reading the shared screen. */
+  visionModel?: string;
 };
 
 export type AiRequest = {
   transcript: string;
   sessionId: string;
   final: boolean;
+  /** What the shared screen showed, in order. */
+  screenNotes?: Array<{ atMs: number; text: string }>;
 };
 
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -113,7 +116,11 @@ async function callProvider(
   config: AiConfig,
   request: AiRequest,
 ): Promise<string> {
-  const prompt = buildPrompt(request.transcript, request.final);
+  const prompt = buildPrompt(
+    request.transcript,
+    request.final,
+    request.screenNotes ?? [],
+  );
   if (provider.wire === "anthropic-messages")
     return callAnthropic(config, prompt);
   if (provider.wire === "gemini") return callGemini(config, prompt);
@@ -230,6 +237,153 @@ async function callCustomServer(
   );
   // The backend already answers with the final JSON shape.
   return JSON.stringify(await response.json());
+}
+
+/* ---------------------------------------------------------------------------
+   Screen reading (vision)
+   ------------------------------------------------------------------------ */
+
+/**
+ * Model used to read the shared screen.
+ *
+ * The notes model is often text-only (`deepseek-chat`, for example), so vision
+ * gets its own sensible default per provider. DeepSeek reads images with
+ * `deepseek-flash`; the others have had vision on their small models for a
+ * while.
+ */
+const VISION_MODELS: Record<ProviderId, string> = {
+  deepseek: "deepseek-flash",
+  openai: "gpt-4o-mini",
+  anthropic: "claude-haiku-4-5",
+  gemini: "gemini-2.5-flash",
+  openrouter: "openai/gpt-4o-mini",
+  custom: "",
+  /* Speech-to-text vendor: no vision endpoint here. */
+  deepgram: "",
+};
+
+export function visionModelFor(
+  provider: ProviderDefinition,
+  config: AiConfig,
+): string {
+  const override = config.visionModel?.trim();
+  if (override) return override;
+  const fallback = VISION_MODELS[provider.id];
+  if (!fallback) return config.model.trim() || provider.defaultModel;
+  return fallback;
+}
+
+/** True when this provider can read an image with the knowledge we have. */
+export function supportsVision(provider: ProviderDefinition): boolean {
+  return Boolean(VISION_MODELS[provider.id]);
+}
+
+/** Splits a `data:image/jpeg;base64,...` URL into its parts. */
+export function splitDataUrl(dataUrl: string): { mimeType: string; data: string } {
+  const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl.trim());
+  if (!match) throw new Error("The screen frame was not a base64 image.");
+  return { mimeType: match[1], data: match[2] };
+}
+
+/** Asks a vision model what is on the shared screen. */
+export async function describeScreen(
+  config: AiConfig,
+  prompt: string,
+  dataUrl: string,
+): Promise<string> {
+  const provider = getProvider(config.provider);
+  if (provider.requiresKey && !config.apiKey.trim())
+    throw new Error(
+      `Add your ${provider.label} API key in Settings to read the screen.`,
+    );
+  const model = visionModelFor(provider, config);
+  /* Fail fast on anything that is not an inline frame: every provider here
+     takes base64, and a clear error beats a silent URL download. */
+  const { mimeType, data } = splitDataUrl(dataUrl);
+
+  if (provider.wire === "anthropic-messages") {
+    const response = await postJson(
+      ENDPOINTS.anthropic,
+      {
+        model,
+        max_tokens: 300,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image", source: { type: "base64", media_type: mimeType, data } },
+            ],
+          },
+        ],
+      },
+      {
+        "x-api-key": config.apiKey.trim(),
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      "Claude",
+    );
+    const body = (await response.json()) as {
+      content?: Array<{ type?: string; text?: unknown }>;
+    };
+    return contentToString(
+      body.content?.find((item) => item.type === "text")?.text,
+    );
+  }
+
+  if (provider.wire === "gemini") {
+    const geminiModel = model.replace(/^models\//, "");
+    const response = await postJson(
+      `${GEMINI_BASE}/${encodeURIComponent(geminiModel)}:generateContent`,
+      {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data } }],
+          },
+        ],
+        generationConfig: { temperature: 0 },
+      },
+      { "x-goog-api-key": config.apiKey.trim() },
+      "Gemini",
+    );
+    const body = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+    };
+    return (body.candidates?.[0]?.content?.parts ?? [])
+      .map((part) => contentToString(part.text))
+      .join("");
+  }
+
+  const response = await postJson(
+    endpointFor(provider, config),
+    {
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              /* `low` downscales the frame before inference: cheaper and plenty
+                 for reading a slide title or a table. */
+              image_url: { url: dataUrl, detail: "low" },
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+    },
+    { Authorization: `Bearer ${config.apiKey.trim()}` },
+    provider.label,
+    provider.networkHint,
+  );
+  const body = (await response.json()) as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
+  return contentToString(body.choices?.[0]?.message?.content);
 }
 
 /* ---------------------------------------------------------------------------
