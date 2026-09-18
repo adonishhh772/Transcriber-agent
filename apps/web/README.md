@@ -18,6 +18,21 @@ Recommended company-laptop starting point:
 
 The UI defaults to 6-second windows with 2 seconds of overlap, suppresses low-RMS windows, and deduplicates repeated boundary words. Window and overlap values are configurable before capture. Cadence adapts at runtime (`src/asr/chunkScheduler.ts`): the first window after speech starts is short so words appear after a couple of seconds, the stride then tracks the measured inference time — a slow CPU fallback widens it (fewer, longer strides) while a GPU narrows it for near-continuous updates — and stale audio is dropped only when the device still cannot keep up, so the transcript never drifts minutes behind.
 
+## Meeting audio, and leaving the page
+
+`Settings → Speech-to-text → Save the meeting audio` (on by default) records the
+same mixed stream the transcriber hears and keeps it with the meeting, so a
+transcript can be replayed against its audio. The recording is stored in the
+browser in its own IndexedDB store (meeting audio is never loaded into the
+library list, and never uploaded), appears as a player plus **Download audio**
+in the meeting view, and is deleted with the meeting.
+
+A running meeting is no longer tied to its page: the live bar (elapsed time,
+input levels, audio size, Pause, End meeting and **Open meeting**) sits outside
+every view, so recording and transcription continue while you browse the library
+or settings, and one click returns to the meeting. Ending a meeting from another
+page brings that view back rather than opening a dialog you cannot see.
+
 ## Requirements
 
 - Windows 10/11

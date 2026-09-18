@@ -10,11 +10,27 @@ export type MeetingRecord = {
   generatedNotes: Record<string, unknown>;
   summary: Record<string, unknown> | null;
   updatedAt: number;
+  /** Set when meeting audio was saved under this id. */
+  hasAudio?: boolean;
+};
+
+/**
+ * Meeting audio lives in its own store: `listMeetings()` must stay cheap, and
+ * pulling every recording into the library list would not be.
+ */
+export type MeetingAudioRecord = {
+  id: string;
+  blob: Blob;
+  mimeType: string;
+  bytes: number;
+  durationMs: number;
+  savedAt: number;
 };
 
 const DB_NAME = "transcriber-meetings";
 const STORE = "meetings";
-export const MEETING_SCHEMA_VERSION = 2;
+const AUDIO_STORE = "audio";
+export const MEETING_SCHEMA_VERSION = 3;
 
 export function openMeetingDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -29,6 +45,8 @@ export function openMeetingDb(): Promise<IDBDatabase> {
         store.createIndex("updatedAt", "updatedAt");
       if (!store.indexNames.contains("title"))
         store.createIndex("title", "title");
+      if (!db.objectStoreNames.contains(AUDIO_STORE))
+        db.createObjectStore(AUDIO_STORE, { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
@@ -60,6 +78,30 @@ export async function getMeeting(
 export async function deleteMeeting(id: string): Promise<void> {
   const db = await openMeetingDb();
   await transaction(db, "readwrite", (store) => store.delete(id));
+  await deleteMeetingAudio(id);
+}
+
+/* ---------------------------------------------------------------------------
+   Meeting audio
+   ------------------------------------------------------------------------ */
+
+export async function saveMeetingAudio(record: MeetingAudioRecord): Promise<void> {
+  const db = await openMeetingDb();
+  await runRequest(db, AUDIO_STORE, "readwrite", (store) => store.put(record));
+}
+
+export async function getMeetingAudio(
+  id: string,
+): Promise<MeetingAudioRecord | undefined> {
+  const db = await openMeetingDb();
+  return runRequest(db, AUDIO_STORE, "readonly", (store) => store.get(id)) as Promise<
+    MeetingAudioRecord | undefined
+  >;
+}
+
+export async function deleteMeetingAudio(id: string): Promise<void> {
+  const db = await openMeetingDb();
+  await runRequest(db, AUDIO_STORE, "readwrite", (store) => store.delete(id));
 }
 
 function transaction(
@@ -67,9 +109,18 @@ function transaction(
   mode: IDBTransactionMode,
   action: (store: IDBObjectStore) => IDBRequest,
 ): Promise<unknown> {
+  return runRequest(db, STORE, mode, action);
+}
+
+function runRequest(
+  db: IDBDatabase,
+  storeName: string,
+  mode: IDBTransactionMode,
+  action: (store: IDBObjectStore) => IDBRequest,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, mode);
-    const request = action(tx.objectStore(STORE));
+    const tx = db.transaction(storeName, mode);
+    const request = action(tx.objectStore(storeName));
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
       reject(request.error ?? new Error("indexeddb_request_failed"));

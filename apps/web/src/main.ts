@@ -24,6 +24,7 @@ import {
   type AsrSettings,
 } from "./asr/asrSettings";
 import type { MeetingTranscriber } from "./asr/types";
+import { MeetingRecorder, formatBytes, recordingSupported } from "./audio/recorder";
 import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
@@ -69,8 +70,10 @@ import {
 } from "./intelligence/vault";
 import {
   deleteMeeting,
+  getMeetingAudio,
   listMeetings,
   saveMeeting,
+  saveMeetingAudio,
   type MeetingRecord,
 } from "./history/db";
 import { searchMeetings } from "./history/search";
@@ -109,6 +112,15 @@ const deepgramLanguage = $("deepgram-language") as HTMLSelectElement;
 const deepgramKey = $("deepgram-key") as HTMLInputElement;
 const deepgramKeyToggle = $("deepgram-key-toggle") as HTMLButtonElement;
 const asrSummary = $("asr-summary");
+const recordAudioToggle = $("record-audio") as HTMLInputElement;
+/* Live bar (outside every view, so a running meeting stays visible) */
+const returnButton = $("return-button") as HTMLButtonElement;
+const floatAudioSize = $("float-audio-size");
+/* Meeting audio */
+const audioNote = $("audio-note");
+const audioPlayer = $("audio-player") as HTMLAudioElement;
+const audioMeta = $("audio-meta");
+const audioDownload = $("audio-download") as HTMLButtonElement;
 const asrLocalOnlyNote = $("asr-local-only-note");
 const modelReload = $("model-reload") as HTMLButtonElement;
 const startLabel = $("start-label");
@@ -281,6 +293,10 @@ let activeBackend: "webgpu" | "wasm" = "wasm";
 let modelWindowMs = 0;
 /** Engine the running meeting actually uses (may differ after a fallback). */
 let activeEngine: "local" | "deepgram" = "local";
+/** Audio recording for the running meeting. */
+let recorder: MeetingRecorder | null = null;
+let audioUrl: string | null = null;
+let audioBytes = 0;
 
 /* ---- Speech-to-text engine --------------------------------------------
    Local Whisper stays available always; Deepgram is used when it is selected
@@ -314,6 +330,8 @@ function syncAsrSettingsUi(): void {
   deepgramTest.disabled = !cloud;
   deepgramForget.disabled = !cloud;
   if (!cloud) setDeepgramStatus("");
+  recordAudioToggle.checked = settings.recordAudio;
+  recordAudioToggle.disabled = !recordingSupported();
   asrSummary.textContent = describeAsrProvider(settings, {
     localOnly: privacyMode.checked,
     deepgramKey: key,
@@ -522,6 +540,8 @@ startButton.addEventListener("click", () => void handleStart());
 startIconButton.addEventListener("click", () => void handleStart());
 stopIconButton.addEventListener("click", () => openEndDialog());
 stopButton.addEventListener("click", () => openEndDialog());
+/* From the library or settings, jump straight back to the running meeting. */
+returnButton.addEventListener("click", () => setView("workspace"));
 historySearch.addEventListener("input", () => renderHistory());
 manualNotes.addEventListener("input", () => void persistCurrentMeeting());
 meetingTitleInput.addEventListener("input", () => {
@@ -761,6 +781,17 @@ deepgramKeyToggle.addEventListener("click", () => {
   deepgramKey.type = showing ? "password" : "text";
   deepgramKeyToggle.textContent = showing ? "Show" : "Hide";
   deepgramKeyToggle.setAttribute("aria-pressed", String(!showing));
+});
+
+recordAudioToggle.addEventListener("change", () => {
+  const settings = currentAsrSettings();
+  settings.recordAudio = recordAudioToggle.checked;
+  saveAsrSettings(settings);
+  showToast(
+    recordAudioToggle.checked
+      ? "Meeting audio will be saved with each transcript"
+      : "Meeting audio will not be saved",
+  );
 });
 
 /* ---- AI notes settings ---------------------------------------------- */
@@ -1127,6 +1158,7 @@ async function handleStart(): Promise<void> {
         : privacyMode.checked
           ? "Transcribing locally"
           : "Transcribing locally · AI ready";
+    startAudioRecording(result.streams);
     capture.display
       .getVideoTracks()[0]
       ?.addEventListener(
@@ -1197,10 +1229,17 @@ function handlePauseResume(): void {
 async function handleStop(message?: string): Promise<void> {
   const currentTranscription = transcription;
   transcription = null;
+  /* The recorder is stopped before the capture graph is torn down, otherwise
+     the last seconds of audio are lost with the tracks. */
+  const currentRecorder = recorder;
+  recorder = null;
+  const recording = currentRecorder ? await currentRecorder.stop() : null;
   if (currentTranscription) await currentTranscription.stop();
   const currentCapture = capture;
   capture = null;
   await stopCapture(currentCapture);
+  if (recording) await storeMeetingAudio(sessionId, recording);
+  floatAudioSize.classList.add("hidden");
   stopTimers();
   resetMeters();
   startButton.classList.remove("hidden");
@@ -1442,6 +1481,7 @@ async function persistCurrentMeeting(): Promise<void> {
     generatedNotes: latestGeneratedNotes,
     summary: latestSummary,
     updatedAt: Date.now(),
+    hasAudio: audioBytes > 0,
   });
   await loadHistory();
 }
@@ -1638,6 +1678,7 @@ function openMeeting(id: string): void {
   liveControls.classList.remove("is-paused");
   durationLabel.textContent = "Duration";
   duration.textContent = formatDuration(Math.round(meeting.durationMs / 1000));
+  loadStoredAudio(meeting.id);
   floatDuration.textContent = duration.textContent;
   setFinaliseState(hasNotes ? "done" : "listening");
   if (!hasNotes)
@@ -1738,6 +1779,11 @@ function updateMeters(): void {
   floatMic.style.width = `${microphone}%`;
   floatSystem.style.width = `${system}%`;
   syncTranscriptionStatus(mixed);
+  if (recorder?.isRecording) {
+    const size = formatBytes(recorder.recordedBytes);
+    if (floatAudioSize.textContent !== size) floatAudioSize.textContent = size;
+    floatAudioSize.classList.remove("hidden");
+  }
 }
 
 /**
@@ -1940,6 +1986,89 @@ async function fallBackToLocalTranscription(message: string): Promise<void> {
 }
 
 /* ============================================================
+   Meeting audio
+   ============================================================ */
+
+/** Starts recording the mixed meeting audio when the setting is on. */
+function startAudioRecording(streams: CaptureStreams): void {
+  clearAudioNote();
+  audioBytes = 0;
+  floatAudioSize.classList.add("hidden");
+  if (!currentAsrSettings().recordAudio) return;
+  if (!recordingSupported()) {
+    showToast("This browser cannot record audio. The transcript continues.");
+    return;
+  }
+  const next = new MeetingRecorder();
+  if (!next.start(streams.mixed)) {
+    showToast("Audio recording could not start. The transcript continues.");
+    return;
+  }
+  recorder = next;
+}
+
+async function storeMeetingAudio(
+  id: string,
+  recording: { blob: Blob; mimeType: string; bytes: number; durationMs: number },
+): Promise<void> {
+  try {
+    await saveMeetingAudio({
+      id,
+      blob: recording.blob,
+      mimeType: recording.mimeType,
+      bytes: recording.bytes,
+      durationMs: recording.durationMs,
+      savedAt: Date.now(),
+    });
+    audioBytes = recording.bytes;
+    showAudioNote(recording.blob, recording.bytes, recording.durationMs);
+    showToast(`Meeting audio saved · ${formatBytes(recording.bytes)}`);
+  } catch {
+    showToast("The audio could not be stored. Your transcript is safe.");
+  }
+}
+
+function showAudioNote(blob: Blob, bytes: number, durationMs: number): void {
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  audioUrl = URL.createObjectURL(blob);
+  audioPlayer.src = audioUrl;
+  audioMeta.textContent = `${formatBytes(bytes)} · ${formatDuration(
+    Math.round(durationMs / 1000),
+  )}`;
+  audioNote.classList.remove("hidden");
+}
+
+function clearAudioNote(): void {
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  audioUrl = null;
+  audioPlayer.removeAttribute("src");
+  audioMeta.textContent = "";
+  audioNote.classList.add("hidden");
+}
+
+/** Shows the stored recording of a saved meeting, when there is one. */
+async function loadStoredAudio(id: string): Promise<void> {
+  clearAudioNote();
+  audioBytes = 0;
+  try {
+    const stored = await getMeetingAudio(id);
+    if (!stored) return;
+    audioBytes = stored.bytes;
+    showAudioNote(stored.blob, stored.bytes, stored.durationMs);
+  } catch {
+    /* Audio is a bonus; the transcript is what matters. */
+  }
+}
+
+audioDownload.addEventListener("click", () => {
+  if (!audioUrl) return;
+  const anchor = document.createElement("a");
+  anchor.href = audioUrl;
+  anchor.download = `${meetingTitle.replace(/[^a-z0-9]+/gi, "-") || "meeting"}-audio.webm`;
+  anchor.click();
+});
+
+/* ============================================================
    Shell behaviour
    ============================================================ */
 
@@ -1963,6 +2092,7 @@ function setView(view: ViewName): void {
   }
   /* Never yank the page to the top unless the view actually changed. */
   if (changed) window.scrollTo(0, 0);
+  syncReturnButton();
   /* The prepare screen owns the Start button, so make sure the model is on its
      way (or already loaded) as soon as it is opened. */
   if (view === "prepare" && initialSupport.supported)
@@ -1971,7 +2101,16 @@ function setView(view: ViewName): void {
 
 function setMeetingState(state: MeetingState): void {
   document.body.dataset.meetingState = state;
+  /* The bar lives outside the views: it tracks the meeting, not the page. */
   liveControls.classList.toggle("hidden", state !== "live");
+  syncReturnButton();
+}
+
+/** Offers a way back to the meeting while it runs on another page. */
+function syncReturnButton(): void {
+  const live = document.body.dataset.meetingState === "live";
+  const onWorkspace = document.body.dataset.view === "workspace";
+  returnButton.classList.toggle("hidden", !live || onWorkspace);
 }
 
 function setPanelTab(tab: "transcript" | "activity"): void {
@@ -2131,6 +2270,9 @@ function showToast(message: string): void {
 
 function openEndDialog(): void {
   if (!capture) return;
+  /* The dialog belongs to the meeting view, so ending from another page first
+     brings that view back rather than opening an invisible modal. */
+  setView("workspace");
   endDialog.classList.remove("hidden");
   confirmEnd.focus();
 }

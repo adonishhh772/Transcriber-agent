@@ -28,6 +28,7 @@ describe("asr settings", () => {
     expect(settings.deepgramModel).toBe("nova-3");
     expect(settings.language).toBe("en");
     expect(settings.localModel).toContain("whisper");
+    expect(settings.recordAudio).toBe(true);
   });
 
   it("round-trips a saved choice", () => {
@@ -36,6 +37,7 @@ describe("asr settings", () => {
       deepgramModel: "nova-2",
       language: "en-GB",
       localModel: "Xenova/whisper-base",
+      recordAudio: false,
     };
     saveAsrSettings(settings);
     expect(loadAsrSettings()).toEqual(settings);
@@ -48,6 +50,7 @@ describe("resolveAsrProvider", () => {
     deepgramModel: "nova-3",
     language: "en",
     localModel: "Xenova/whisper-tiny.en",
+    recordAudio: true,
   };
 
   it("uses Deepgram when a key is present", () => {

@@ -17,6 +17,8 @@ export type AsrSettings = {
   language: string;
   /** Local Whisper model id. */
   localModel: string;
+  /** Keep the mixed meeting audio so it can be replayed or downloaded. */
+  recordAudio: boolean;
 };
 
 const DEFAULTS: AsrSettings = {
@@ -24,6 +26,7 @@ const DEFAULTS: AsrSettings = {
   deepgramModel: "nova-3",
   language: "en",
   localModel: "Xenova/whisper-tiny.en",
+  recordAudio: true,
 };
 
 export const DEEPGRAM_MODELS = ["nova-3", "nova-2", "nova-2-general"];
@@ -45,6 +48,7 @@ export function loadAsrSettings(): AsrSettings {
       deepgramModel: parsed.deepgramModel?.trim() || DEFAULTS.deepgramModel,
       language: parsed.language?.trim() || DEFAULTS.language,
       localModel: parsed.localModel?.trim() || DEFAULTS.localModel,
+      recordAudio: parsed.recordAudio !== false,
     };
   } catch {
     return { ...DEFAULTS };

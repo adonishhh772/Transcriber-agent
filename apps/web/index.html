@@ -718,6 +718,18 @@
                   <select id="deepgram-language"></select>
                 </label>
 
+                <label class="check-row" for="record-audio">
+                  <input id="record-audio" type="checkbox" checked />
+                  <span>
+                    <strong>Save the meeting audio</strong>
+                    <small
+                      >Keeps the mixed meeting audio with the transcript in this
+                      browser, so you can replay or download it. Nothing is
+                      uploaded.</small
+                    >
+                  </span>
+                </label>
+
                 <div class="field" id="deepgram-key-field">
                   <label id="deepgram-key-label" for="deepgram-key"
                     >Deepgram API key</label
@@ -1146,6 +1158,21 @@
 
               <div class="document-rule"></div>
 
+              <div class="audio-note hidden" id="audio-note">
+                <span class="section-label">Meeting audio</span>
+                <audio id="audio-player" controls preload="metadata"></audio>
+                <div class="audio-note-actions">
+                  <span class="audio-meta" id="audio-meta"></span>
+                  <button
+                    id="audio-download"
+                    class="btn btn-quiet btn-compact"
+                    type="button"
+                  >
+                    Download audio
+                  </button>
+                </div>
+              </div>
+
               <div class="note-group note-group-personal">
                 <p class="section-label">
                   <span class="personal-mark" aria-hidden="true"></span>
@@ -1422,42 +1449,6 @@
             </aside>
           </div>
 
-          <div class="live-controls hidden" id="live-controls">
-            <span class="live-status">
-              <span class="dot" aria-hidden="true"></span>
-              <span class="live-label" id="live-label">Recording</span>
-              <span class="live-time" id="float-duration">00:00</span>
-            </span>
-            <span
-              class="ctl-levels"
-              aria-hidden="true"
-              title="Microphone and system audio levels"
-            >
-              <span class="ctl-level">
-                <svg class="icon"><use href="#i-mic"></use></svg>
-                <span class="ctl-level-bar"><i id="float-mic"></i></span>
-              </span>
-              <span class="ctl-level">
-                <svg class="icon"><use href="#i-volume"></use></svg>
-                <span class="ctl-level-bar"><i id="float-system"></i></span>
-              </span>
-            </span>
-            <span class="live-sep" aria-hidden="true"></span>
-            <button
-              id="pause-button"
-              class="btn btn-quiet hidden"
-              type="button"
-            >
-              Pause
-            </button>
-            <button id="stop-button" class="btn btn-end hidden" type="button">
-              <svg class="icon" aria-hidden="true">
-                <use href="#i-stop"></use>
-              </svg>
-              End meeting
-            </button>
-          </div>
-
           <div id="end-dialog" class="dialog-backdrop hidden">
             <section
               class="dialog"
@@ -1496,6 +1487,44 @@
             </section>
           </div>
         </section>
+
+        <!-- Live bar: outside every view on purpose, so a running meeting stays
+             visible and controllable from the library, settings or anywhere. -->
+        <div class="live-controls hidden" id="live-controls">
+          <span class="live-status">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="live-label" id="live-label">Recording</span>
+            <span class="live-time" id="float-duration">00:00</span>
+            <span class="live-audio hidden" id="float-audio-size">0 MB</span>
+          </span>
+          <span
+            class="ctl-levels"
+            aria-hidden="true"
+            title="Microphone and system audio levels"
+          >
+            <span class="ctl-level">
+              <svg class="icon"><use href="#i-mic"></use></svg>
+              <span class="ctl-level-bar"><i id="float-mic"></i></span>
+            </span>
+            <span class="ctl-level">
+              <svg class="icon"><use href="#i-volume"></use></svg>
+              <span class="ctl-level-bar"><i id="float-system"></i></span>
+            </span>
+          </span>
+          <span class="live-sep" aria-hidden="true"></span>
+          <button id="return-button" class="btn btn-quiet hidden" type="button">
+            Open meeting
+          </button>
+          <button id="pause-button" class="btn btn-quiet hidden" type="button">
+            Pause
+          </button>
+          <button id="stop-button" class="btn btn-end hidden" type="button">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-stop"></use>
+            </svg>
+            End meeting
+          </button>
+        </div>
       </main>
     </div>
 
