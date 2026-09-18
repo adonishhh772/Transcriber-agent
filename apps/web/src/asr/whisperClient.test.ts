@@ -52,6 +52,9 @@ function lastWorker(): FakeWorker {
 beforeEach(() => {
   FakeWorker.instances = [];
   vi.stubGlobal("Worker", FakeWorker);
+  /* Node 20 has no `navigator` at all, so pin it: the WebGPU probe must simply
+     report "no adapter" there. */
+  vi.stubGlobal("navigator", {});
   /* `window` does not exist in the node test environment. The shim delegates
      instead of copying, so fake timers installed later still apply. */
   (globalThis as { window?: unknown }).window = {

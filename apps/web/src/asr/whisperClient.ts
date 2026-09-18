@@ -182,6 +182,7 @@ async function supportsWebGpu(): Promise<boolean> {
   /* `"gpu" in navigator` is not enough: Chrome exposes the object even when no
      adapter is available (software rendering, blocked GPU), and a failed load
      then costs a full model download before falling back to WASM. */
+  if (typeof navigator === "undefined") return false;
   const gpu = (navigator as Navigator & {
     gpu?: { requestAdapter?: () => Promise<unknown | null> };
   }).gpu;
