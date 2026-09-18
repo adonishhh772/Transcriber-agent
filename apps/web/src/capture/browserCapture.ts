@@ -21,25 +21,72 @@ export type CaptureStatus = {
 export class NoSystemAudioError extends Error {
   constructor() {
     super(
-      "No system audio was shared. Select Entire Screen and enable Share system audio.",
+      "No meeting audio was shared. In the picker, share the meeting window (or Entire Screen) and tick Share system audio — or a browser tab with Share tab audio.",
     );
     this.name = "NoSystemAudioError";
   }
 }
 
-function getDisplayMediaConstraints(): DisplayMediaStreamOptions {
+/**
+ * Chrome's display-capture options, ahead of this project's DOM typings.
+ *
+ * `DisplayMediaStreamOptions` in the TS lib does not know these yet, so they are
+ * declared here rather than cast away at the call site — the shapes are the ones
+ * the browser actually reads.
+ */
+export type DisplayCaptureOptions = DisplayMediaStreamOptions & {
+  systemAudio?: "include" | "exclude";
+  surfaceSwitching?: "include" | "exclude";
+  selfBrowserSurface?: "include" | "exclude";
+};
+
+/**
+ * What the browser is asked for when a meeting starts.
+ *
+ * Exported because the shape matters — see the test: these options were once
+ * nested inside the audio constraints, where the browser silently ignored them.
+ */
+export function getDisplayMediaConstraints(): DisplayCaptureOptions {
   return {
+    /* A hint, not a limit: the picker preselects "Window" so the default is one
+       window rather than the whole desktop. Sharing a tab or an entire screen
+       stays possible, because a tab is where a web meeting often lives and
+       system audio is easiest to capture from a monitor. */
     video: {
-      displaySurface: "monitor",
+      displaySurface: "window",
     } as MediaTrackConstraints,
-    audio: {
-      // Chrome and Edge support these Windows-focused hints. Unknown members
-      // are ignored by browsers that do not implement the hint.
-      systemAudio: "include",
-      surfaceSwitching: "include",
-      selfBrowserSurface: "exclude",
-    } as MediaTrackConstraints,
-  } as DisplayMediaStreamOptions;
+    audio: true,
+    /*
+     * These belong at the top level of the options dictionary. They used to sit
+     * inside the audio constraints, where the browser ignores them — which left
+     * `surfaceSwitching` at its default "include", so the shared surface could
+     * be swapped for another one mid-meeting without asking again.
+     *
+     * - `systemAudio: "include"` offers the "share system audio" checkbox; the
+     *   meeting audio comes from the shared surface, so it is required.
+     * - `surfaceSwitching: "exclude"` removes the picker's "switch surface"
+     *   control: what was picked when the meeting started is the only thing this
+     *   app can ever read for that meeting.
+     * - `selfBrowserSurface: "exclude"` keeps this app's own tab out of the
+     *   picker, so a screen share can never loop back into this page.
+     */
+    systemAudio: "include",
+    surfaceSwitching: "exclude",
+    selfBrowserSurface: "exclude",
+  };
+}
+
+/** True when the user shared an entire monitor rather than one tab or window. */
+export function isWholeScreen(surface: string | null): boolean {
+  return surface === "monitor";
+}
+
+/** Plain-language name for the surface being read. */
+export function describeDisplaySurface(surface: string | null): string {
+  if (surface === "monitor") return "your whole screen";
+  if (surface === "window") return "the shared window";
+  if (surface === "browser") return "the shared tab";
+  return "the surface you shared";
 }
 
 export async function queryMicrophonePermission(): Promise<

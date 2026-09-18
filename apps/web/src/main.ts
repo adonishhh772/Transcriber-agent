@@ -4,6 +4,9 @@ import {
   NoSystemAudioError,
   queryMicrophonePermission,
   captureSupport,
+  describeDisplaySurface,
+  getDisplaySurface,
+  isWholeScreen,
   startCapture,
   stopCapture,
 } from "./capture/browserCapture";
@@ -138,7 +141,6 @@ const audioNote = $("audio-note");
 const audioPlayer = $("audio-player") as HTMLAudioElement;
 const audioMeta = $("audio-meta");
 const audioDownload = $("audio-download") as HTMLButtonElement;
-const asrLocalOnlyNote = $("asr-local-only-note");
 const modelReload = $("model-reload") as HTMLButtonElement;
 const startLabel = $("start-label");
 const transcriptionLag = $("transcription-lag");
@@ -260,7 +262,7 @@ const settingsTabs = Array.from(
   document.querySelectorAll<HTMLButtonElement>("[data-settings-tab]"),
 );
 const asrPanel = $("asr-settings");
-const notesTab = $("tab-notes") as HTMLButtonElement;
+const cloudSettings = $("cloud-settings");
 const aiKeyLabel = $("ai-key-label");
 const aiKeyToggle = $("ai-key-toggle") as HTMLButtonElement;
 const aiProviderSummary = $("ai-provider-summary");
@@ -374,7 +376,6 @@ function syncAsrSettingsUi(): void {
     localOnly: privacyMode.checked,
     deepgramKey: key,
   });
-  asrLocalOnlyNote.classList.toggle("hidden", !privacyMode.checked);
   syncModelState();
 }
 
@@ -2239,6 +2240,22 @@ function startScreenReading(streams: CaptureStreams): void {
     return;
   }
   screenReader = reader;
+  /* Say exactly what is being read. The app only ever sees the one surface the
+     browser handed over, so naming it is the honest answer to "what can it
+     see?" — and a whole monitor deserves a warning. */
+  const surface = getDisplaySurface(streams.display);
+  const where = describeDisplaySurface(surface);
+  if (isWholeScreen(surface)) {
+    if (screenStatus)
+      screenStatus.textContent = `Reading ${where}: everything on it — other windows included — is visible to the vision model. Share a single window to keep it to the meeting.`;
+    showToast(
+      "Screen reading sees your whole screen. Share one window next time to keep it to the meeting.",
+    );
+  } else {
+    if (screenStatus)
+      screenStatus.textContent = `Reading ${where} every ~25 seconds. Nothing else on your screen is read.`;
+    showToast(`Screen reading is limited to ${where}.`);
+  }
 }
 
 function appendScreenNote(note: { atMs: number; text: string }): void {
@@ -2676,9 +2693,13 @@ function syncPrivacyState(): void {
   railMode.textContent = local ? "Local-only mode" : "Local capture · v0.1";
   backendUrl.disabled = local;
   apiToken.disabled = local;
-  /* The notes settings are only usable once local-only mode is off; the tab
-     itself stays visible and explains why. */
+  /* The cloud tabs and the vault that feeds them only make sense with local-only
+     mode off; the Privacy block stays, and so does the audio-recording switch. */
+  cloudSettings.classList.toggle("hidden", local);
   applySettingsTab();
+  /* The engine summary says whether audio leaves the device, so it has to be
+     rewritten the moment this switch moves. */
+  syncAsrSettingsUi();
   syncAiStatusSummary();
   syncAskState();
 }
@@ -2689,14 +2710,21 @@ function setSettingsTab(tab: "stt" | "notes"): void {
   applySettingsTab();
 }
 
+/**
+ * Which settings tab is showing.
+ *
+ * Both tabs are cloud features — a speech engine that streams audio away, and a
+ * notes provider that receives text — so with local-only mode on the tab row is
+ * hidden entirely rather than offering a choice that cannot be honoured. What
+ * stays on this device (the audio recording) lives in the Privacy block, which
+ * is always visible.
+ */
 function applySettingsTab(): void {
-  const notesUsable = !privacyMode.checked;
-  /* The AI notes tab only exists when local-only mode is off. Turning that mode
-     on while the tab is open falls back to the speech-to-text tab. */
-  notesTab.classList.toggle("hidden", !notesUsable);
-  const tab = settingsTab === "notes" && !notesUsable ? "stt" : settingsTab;
+  const cloud = !privacyMode.checked;
+  /* Null means "no tab at all": there is nothing cloud-side to choose between. */
+  const tab = cloud ? settingsTab : null;
   asrPanel.classList.toggle("hidden", tab !== "stt");
-  aiSettings.classList.toggle("hidden", tab !== "notes" || !notesUsable);
+  aiSettings.classList.toggle("hidden", tab !== "notes");
   for (const button of settingsTabs) {
     const active = button.dataset.settingsTab === tab;
     button.classList.toggle("is-active", active);

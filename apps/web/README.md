@@ -20,12 +20,43 @@ The UI defaults to 6-second windows with 2 seconds of overlap, suppresses low-RM
 
 ## Meeting audio, and leaving the page
 
-`Settings → Speech-to-text → Save the meeting audio` (on by default) records the
+`Settings → Privacy → Save the meeting audio` (on by default) records the
 same mixed stream the transcriber hears and keeps it with the meeting, so a
 transcript can be replayed against its audio. The recording is stored in the
 browser in its own IndexedDB store (meeting audio is never loaded into the
 library list, and never uploaded), appears as a player plus **Download audio**
-in the meeting view, and is deleted with the meeting.
+in the meeting view, and is deleted with the meeting. It sits in the Privacy
+block because it is a this-device setting, and it stays reachable when
+local-only mode hides the cloud tabs.
+
+## What screen reading can and cannot see
+
+The app never takes screenshots of its own accord. It reads **one** surface: the
+one picked in the browser's share dialog when the meeting starts, delivered as
+the display track that also carries the meeting audio.
+
+- `surfaceSwitching: "exclude"` removes the picker's switch control, so the
+  surface chosen at the start is the only one that meeting can read. (These
+  display options have to sit at the top level of the options dictionary — nested
+  inside the audio constraints the browser ignores them, which is why this is
+  spelled out here and covered by a test.)
+- `selfBrowserSurface: "exclude"` keeps this app's own tab out of the picker, so
+  a share can never loop back into this page.
+- The picker hint prefers **Window**, so the default is one window rather than
+  the whole desktop. Sharing a tab or an entire screen is still allowed: a web
+  meeting often lives in a tab, and Windows offers system audio most reliably for
+  a monitor.
+- Nothing else on the machine is captured, there is no periodic desktop
+  screenshot, and the frame is never stored — downscaled to 640px, sent at most
+  every ~25 seconds and only when the picture changed, and reduced to a text
+  description that is kept with the meeting.
+- After the picker closes, the app says which surface it got: *"Screen reading is
+  limited to the shared window"*, or, if the whole monitor was shared, a warning
+  that everything on it — other windows included — is visible to the model.
+
+If you need a hard guarantee that only the meeting is read, pick that one window;
+the app cannot restrict the picker further, because the browser deliberately
+leaves the choice to the user.
 
 A running meeting is no longer tied to its page: the live bar (elapsed time,
 input levels, audio size, Pause, End meeting and **Open meeting**) sits outside
@@ -71,7 +102,9 @@ Four views share one shell (navigation rail + main region):
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
 3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, pause/resume, end meeting). While a meeting runs the workspace is the only screen: the navigation rail is hidden and the library and settings cannot be opened until the meeting ends.
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
-5. **Settings** — Privacy (local-only mode), AI notes (provider, model, key, test, forget) and Transcription (Whisper model, chunk, overlap).
+5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
+
+The settings page follows local-only mode. **Both tabs are cloud features** — a speech engine that streams audio away and a notes provider that receives text — so turning local-only mode on hides the tab row, both panels and the key vault, leaving Privacy and Local Whisper. That is also why the two capture switches live where they do: *Summarise shared screens* is a vision-model setting and sits with AI notes, while *Save the meeting audio* stays on this device and sits in the Privacy block, reachable either way.
 
 ### AI activity
 
@@ -239,23 +272,26 @@ npm run format
 15. Repeat with a Zoom meeting and a Teams meeting.
 16. Repeat by choosing a window instead of Entire Screen and document whether the browser offers system audio. The required error is shown if no system-audio track is returned:
 
-`No system audio was shared. Select Entire Screen and enable Share system audio.`
+`No meeting audio was shared. In the picker, share the meeting window (or Entire Screen) and tick Share system audio — or a browser tab with Share tab audio.`
+
+17. With **Summarise shared screens** on, confirm the toast names the surface that was picked (`Screen reading is limited to the shared window`, or the whole-screen warning), and that the picker offers no way to switch surfaces afterwards.
 
 ## Production review status
 
 - Capture cleanup stops display, microphone, mixed destination, and output tracks; disconnects Web Audio nodes; closes the AudioContext; and disposes the Whisper worker.
-- The display video track is never sent to the backend. System audio comes from the display audio track and microphone audio comes from the separate microphone stream, avoiding duplicate input selection.
+- The display video track is never uploaded as video: when *Summarise shared screens* is on, the app draws one frame every ~25 seconds into a 640px-wide canvas, sends that downscaled JPEG to the configured vision model, and keeps only the returned text. Nothing is recorded, and the frame is discarded immediately.
+- System audio comes from the display audio track and microphone audio comes from the separate microphone stream, avoiding duplicate input selection.
 - Transcript rendering uses DOM text nodes rather than unsafe HTML interpolation. Markdown export contains text only.
-- IndexedDB schema version 2 adds `updatedAt` and `title` indexes. Future changes must increment `MEETING_SCHEMA_VERSION` and migrate records.
+- IndexedDB schema version 4 adds `screenNotes`, `aiActivity` and `qa` to a meeting record. Future changes must increment `MEETING_SCHEMA_VERSION` and migrate records.
 - Unsupported browser messaging is shown when required capture APIs are missing. WebGPU model-load failure retries with WASM.
-- Intelligence requests are debounced, bounded to the latest 100 finalized segments, and aborted after 30 seconds. Local transcription and persistence continue after DeepSeek outage or timeout.
+- Rolling intelligence requests are debounced and bounded to the latest 100 segments to keep the cost of a long meeting sane. The final notes pass and every question read the **whole** transcript; requests abort after 45 seconds. Local transcription and persistence continue after DeepSeek outage or timeout.
 - Keyboard controls include Tab/Enter with visible focus rings, Space to pause or resume while the page body is focused, and Escape to close the end-meeting dialog or stop capture.
 
 ## Known limitations
 
-- Chrome/Edge control which display surfaces expose system audio; the app cannot override a missing browser picker option.
-- The prototype intentionally keeps the video track only long enough to identify and stop it during cleanup. It never connects video to an output, recorder, request, or storage.
-- The browser can now send finalized transcript text to the optional FastAPI intelligence endpoint. Raw audio and display video remain local and are never sent. Enable local-only privacy mode by not configuring the backend request path.
+- Chrome/Edge control which display surfaces expose system audio, and the app cannot restrict the picker to one surface — the choice belongs to the user. It can only refuse to switch surfaces mid-meeting, exclude its own tab, and say afterwards which surface it was given.
+- The prototype keeps the video track for the transcript and, when screen summarising is on, for one downscaled frame every ~25 seconds. It never records video, never connects it to storage, and never uploads a frame when that setting is off (or in local-only mode, which refuses to read screens at all).
+- The browser can now send finalized transcript text to the optional FastAPI intelligence endpoint. Raw audio and display video are never uploaded; screen frames go to the configured vision provider only while *Summarise shared screens* is on, and only as a description is anything kept.
 - Browser Whisper support is intended for current Chrome/Edge builds with WebGPU; browsers without WebGPU use the WASM path. Performance observations should be recorded during manual testing as model download time, first-result latency, sustained transcription lag, and memory pressure.
 - The display-surface label is browser-dependent and may be `Not selected` even when a display was selected.
 - No server-side or application-level permission persistence is implemented; browser permissions remain controlled by Chrome/Edge.

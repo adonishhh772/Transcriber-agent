@@ -644,11 +644,25 @@
                 <input id="privacy-mode" type="checkbox" checked />
                 <span class="switch-ui" aria-hidden="true"></span>
               </label>
+
+              <label class="switch-row" for="record-audio">
+                <span class="switch-copy">
+                  <strong>Save the meeting audio</strong>
+                  <small
+                    >Keep the mixed meeting audio with the transcript in this
+                    browser, so you can replay or download it. Nothing is
+                    uploaded.</small
+                  >
+                </span>
+                <input id="record-audio" type="checkbox" checked />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </label>
             </section>
 
-            <section class="settings-block">
+            <section class="settings-block" id="cloud-settings">
               <div
                 class="panel-tabs"
+                id="settings-tabs"
                 role="tablist"
                 aria-label="Transcription and notes"
               >
@@ -718,33 +732,6 @@
                   <select id="deepgram-language"></select>
                 </label>
 
-                <label class="check-row" for="read-screen">
-                  <input id="read-screen" type="checkbox" checked />
-                  <span>
-                    <strong>Summarise shared screens</strong>
-                    <small
-                      >Every ~25 seconds the shared screen is read by a vision
-                      model on your AI provider, so slides and documents reach
-                      the notes. Only the description is kept: frames are not
-                      stored, and nothing is sent anywhere but that
-                      provider. Local-only mode disables this.</small
-                    >
-                  </span>
-                </label>
-                <small class="field-hint" id="screen-status"></small>
-
-                <label class="check-row" for="record-audio">
-                  <input id="record-audio" type="checkbox" checked />
-                  <span>
-                    <strong>Save the meeting audio</strong>
-                    <small
-                      >Keeps the mixed meeting audio with the transcript in this
-                      browser, so you can replay or download it. Nothing is
-                      uploaded.</small
-                    >
-                  </span>
-                </label>
-
                 <div class="field" id="deepgram-key-field">
                   <label id="deepgram-key-label" for="deepgram-key"
                     >Deepgram API key</label
@@ -792,20 +779,6 @@
                 </div>
 
                 <p class="ai-provider-summary" id="asr-summary" role="status"></p>
-                <section
-                  class="notice notice-warning hidden"
-                  id="asr-local-only-note"
-                  role="status"
-                >
-                  <svg class="icon" aria-hidden="true">
-                    <use href="#i-help"></use>
-                  </svg>
-                  <span
-                    >Local-only mode is on, so Whisper runs in this browser and
-                    no audio is uploaded. Turn it off to use a cloud
-                    engine.</span
-                  >
-                </section>
               </section>
 
               <section
@@ -890,6 +863,23 @@
                     aria-live="polite"
                   ></span>
                 </div>
+
+                <label class="check-row" for="read-screen">
+                  <input id="read-screen" type="checkbox" checked />
+                  <span>
+                    <strong>Summarise shared screens</strong>
+                    <small
+                      >Reads the surface you chose to share — the meeting window,
+                      a tab, or your whole screen if that is what you picked —
+                      with the vision model above, so slides and documents reach
+                      the notes. One frame every ~25 seconds, and only when the
+                      picture changed. Frames are never stored: only the
+                      description is kept. Pick just the meeting window when the
+                      browser asks what to share.</small
+                    >
+                  </span>
+                </label>
+                <small class="field-hint" id="screen-status"></small>
 
                 <div id="ai-custom" class="hidden">
                   <label class="field" for="backend-url">
