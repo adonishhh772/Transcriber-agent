@@ -751,6 +751,7 @@ async function handleStart(): Promise<void> {
     noWindowsWarned = false;
     throttledWarned = false;
     lastDiagnosticsAt = 0;
+    lastSnapshot = null;
     lastRollingAt = 0;
     rollingInFlight = false;
     syncAiStatusSummary();
@@ -1005,6 +1006,8 @@ let noWindowsWarned = false;
 let throttledWarned = false;
 /** When the transcriber last reported anything at all. */
 let lastDiagnosticsAt = 0;
+/** Latest counters, or null when the transcriber has never reported. */
+let lastSnapshot: TranscriptionDiagnostics | null = null;
 
 /** Level, in percent, with a decimal while it is low enough to read as "0%". */
 function formatLevelPercent(value: number): string {
@@ -1024,6 +1027,7 @@ function handleTranscriptionDiagnostics(
 ): void {
   const level = formatLevelPercent(snapshot.level * 100);
   lastDiagnosticsAt = Date.now();
+  lastSnapshot = snapshot;
   transcriptionLevel.textContent = level;
   transcriptionWindows.textContent = `${snapshot.transcribed} transcribed · ${snapshot.skippedSilent} too quiet`;
   const liveFor = startedAt === null ? 0 : Date.now() - startedAt;
@@ -1416,13 +1420,25 @@ function updateMeters(): void {
 
 /**
  * Keeps the transcript panel honest when the transcriber reports nothing at
- * all: a live meeting whose windows never arrive is invisible otherwise.
+ * all. Windows are only decided every few seconds, so this heartbeat must not
+ * confuse "a slow inference is running" with "no audio ever arrived" — the
+ * warning is only for the case where no window has *ever* been produced.
  */
 function syncTranscriptionStatus(mixedLevel: number): void {
   if (startedAt === null) return;
-  const sinceDiagnostics = Date.now() - lastDiagnosticsAt;
-  if (sinceDiagnostics < 3000) return;
+  if (Date.now() - lastDiagnosticsAt < 3000) return;
   const level = formatLevelPercent(mixedLevel);
+  if (lastSnapshot) {
+    const working =
+      lastSnapshot.inFlightMs > 0
+        ? lastSnapshot.inFlightMs + (Date.now() - lastDiagnosticsAt)
+        : 0;
+    transcriptionStatus.textContent =
+      working > 0
+        ? `input ${level} · ${lastSnapshot.transcribed} windows · working ${(working / 1000).toFixed(1)}s`
+        : `input ${level} · ${lastSnapshot.transcribed} windows · last result ${(lastSnapshot.sinceInferenceMs / 1000).toFixed(0)}s ago`;
+    return;
+  }
   transcriptionStatus.textContent = `input ${level} · no windows yet`;
   if (Date.now() - startedAt < 12_000 || noWindowsWarned) return;
   noWindowsWarned = true;
