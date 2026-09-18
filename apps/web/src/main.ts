@@ -9,8 +9,20 @@ import {
 } from "./capture/browserCapture";
 import {
   TranscriptionController,
+  type TranscriptionCallbacks,
   type TranscriptionDiagnostics,
 } from "./asr/transcriptionController";
+import { DeepgramController } from "./asr/deepgramController";
+import {
+  DEEPGRAM_LANGUAGES,
+  DEEPGRAM_MODELS,
+  describeAsrProvider,
+  loadAsrSettings,
+  resolveAsrProvider,
+  saveAsrSettings,
+  type AsrSettings,
+} from "./asr/asrSettings";
+import type { MeetingTranscriber } from "./asr/types";
 import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
@@ -51,6 +63,7 @@ import {
 import {
   MIN_PASSPHRASE_LENGTH,
   encryptionAvailable,
+  updateVault,
 } from "./intelligence/vault";
 import {
   deleteMeeting,
@@ -84,6 +97,18 @@ const modelStatus = $("model-status");
 const modelProgress = $("model-progress");
 const modelHint = $("model-hint");
 const backendMode = $("backend-mode") as HTMLSelectElement;
+/* Speech-to-text */
+const asrProvider = $("asr-provider") as HTMLSelectElement;
+const deepgramModel = $("deepgram-model") as HTMLInputElement;
+const deepgramModelOptions = $(
+  "deepgram-model-options",
+) as HTMLDataListElement;
+const deepgramLanguage = $("deepgram-language") as HTMLSelectElement;
+const deepgramKey = $("deepgram-key") as HTMLInputElement;
+const deepgramKeyToggle = $("deepgram-key-toggle") as HTMLButtonElement;
+const deepgramRemember = $("deepgram-remember") as HTMLInputElement;
+const asrSummary = $("asr-summary");
+const asrLocalOnlyNote = $("asr-local-only-note");
 const modelReload = $("model-reload") as HTMLButtonElement;
 const startLabel = $("start-label");
 const transcriptionLag = $("transcription-lag");
@@ -205,7 +230,7 @@ const ROLLING_INTERVAL_MS = 25_000;
 let autoscrollEnabled = true;
 
 let capture: CaptureStreams | null = null;
-let transcription: TranscriptionController | null = null;
+let transcription: MeetingTranscriber | null = null;
 let meterTimer: number | null = null;
 let durationTimer: number | null = null;
 let startedAt: number | null = null;
@@ -241,6 +266,53 @@ let modelReloadTimer: number | null = null;
 let activeBackend: "webgpu" | "wasm" = "wasm";
 /** Model time for the last window, separated from queue wait. */
 let modelWindowMs = 0;
+/** Engine the running meeting actually uses (may differ after a fallback). */
+let activeEngine: "local" | "deepgram" = "local";
+
+/* ---- Speech-to-text engine --------------------------------------------
+   Local Whisper stays available always; Deepgram is used when it is selected
+   and a key is present, unless local-only mode is on. */
+function currentAsrSettings(): AsrSettings {
+  return loadAsrSettings();
+}
+
+function deepgramKeyValue(): string {
+  return getApiKey("deepgram");
+}
+
+function effectiveAsrProvider(): "local" | "deepgram" {
+  return resolveAsrProvider(currentAsrSettings(), {
+    localOnly: privacyMode.checked,
+    deepgramKey: deepgramKeyValue(),
+  });
+}
+
+function syncAsrSettingsUi(): void {
+  const settings = currentAsrSettings();
+  const key = deepgramKeyValue();
+  asrProvider.value = settings.provider;
+  deepgramModel.value = settings.deepgramModel;
+  if (deepgramKey.value !== key) deepgramKey.value = key;
+  const cloud = settings.provider === "deepgram";
+  deepgramModel.disabled = !cloud;
+  deepgramLanguage.disabled = !cloud;
+  deepgramKey.disabled = !cloud;
+  deepgramKeyToggle.disabled = !cloud;
+  deepgramRemember.disabled = !cloud;
+  asrSummary.textContent = describeAsrProvider(settings, {
+    localOnly: privacyMode.checked,
+    deepgramKey: key,
+  });
+  asrLocalOnlyNote.classList.toggle("hidden", !privacyMode.checked);
+  syncModelState();
+}
+
+function syncAsrProviderFromCapture(): void {
+  const provider = effectiveAsrProvider();
+  if (provider !== "deepgram" && initialSupport.supported)
+    void ensureWhisperModel();
+}
+
 
 /**
  * The first inference compiles kernels and measured 17-30s in the browser, so
@@ -365,6 +437,28 @@ async function loadWhisperModel(
 /** Keeps the Start button, the setup row and the hint in one state. */
 function syncModelState(): void {
   const supported = initialSupport.supported;
+  /* With Deepgram selected there is no local model to wait for: the engine is
+     ready as soon as a key exists, so Start does not depend on a download. */
+  const cloud =
+    typeof asrProvider !== "undefined" &&
+    asrProvider.value === "deepgram" &&
+    Boolean(deepgramKeyValue().trim()) &&
+    !privacyMode.checked;
+  if (cloud) {
+    const settings = currentAsrSettings();
+    prepareModel.textContent = `Deepgram ${settings.deepgramModel} · cloud`;
+    startButton.disabled = !supported;
+    if (startIconButton) startIconButton.disabled = false;
+    modelReload.classList.add("hidden");
+    backendElement.textContent = "Cloud streaming";
+    backendHint.textContent =
+      "Deepgram transcribes as you speak. Audio is streamed to Deepgram while a meeting runs; switch to Local Whisper to keep it on this device.";
+    if (startLabel) startLabel.textContent = "Start meeting";
+    modelHint.textContent = supported
+      ? "Real-time transcription is ready — no model download needed."
+      : (initialSupport.reason ?? "Browser capture is unavailable here.");
+    return;
+  }
   const state =
     modelState === "loading"
       ? `loading ${Math.round(modelPercent)}%`
@@ -524,7 +618,7 @@ modelReload.addEventListener("click", () => {
 async function reloadWhisperModel(): Promise<void> {
   const client = await ensureWhisperModel(true);
   if (!client) return;
-  if (transcription) {
+  if (transcription instanceof TranscriptionController) {
     transcription.setClient(client);
     showToast("Whisper model reloaded");
   }
@@ -534,6 +628,103 @@ backendMode.addEventListener("change", () => {
   const value = backendMode.value === "wasm" ? "wasm" : "auto";
   saveBackendMode(value);
   void reloadWhisperModel();
+});
+
+/* ---- Speech-to-text settings ----------------------------------------- */
+for (const model of DEEPGRAM_MODELS) {
+  const option = document.createElement("option");
+  option.value = model;
+  deepgramModelOptions.append(option);
+}
+for (const language of DEEPGRAM_LANGUAGES) {
+  const option = document.createElement("option");
+  option.value = language.id;
+  option.textContent = language.label;
+  deepgramLanguage.append(option);
+}
+
+function saveAsrAndSync(): void {
+  const settings = currentAsrSettings();
+  saveAsrSettings(settings);
+  syncAsrSettingsUi();
+}
+
+/**
+ * Choosing a cloud engine is an explicit decision to send audio off the
+ * device, so it turns local-only mode off (the reverse is never automatic).
+ */
+function allowCloudAudioWhenChosen(): void {
+  if (currentAsrSettings().provider !== "deepgram") return;
+  if (!deepgramKeyValue().trim() || !privacyMode.checked) return;
+  privacyMode.checked = false;
+  syncPrivacyState();
+  /* Re-render: the summary and the Start button both depend on this. */
+  syncAsrSettingsUi();
+  showToast("Local-only mode off: Deepgram needs to receive meeting audio");
+}
+
+asrProvider.addEventListener("change", () => {
+  const settings = currentAsrSettings();
+  settings.provider = asrProvider.value === "local" ? "local" : "deepgram";
+  saveAsrSettings(settings);
+  syncAsrSettingsUi();
+  allowCloudAudioWhenChosen();
+  syncAsrProviderFromCapture();
+});
+
+deepgramModel.addEventListener("change", () => {
+  const settings = currentAsrSettings();
+  settings.deepgramModel = deepgramModel.value.trim() || "nova-3";
+  saveAsrSettings(settings);
+  syncAsrSettingsUi();
+});
+
+deepgramLanguage.addEventListener("change", () => {
+  const settings = currentAsrSettings();
+  settings.language = deepgramLanguage.value || "en";
+  saveAsrSettings(settings);
+  syncAsrSettingsUi();
+});
+
+deepgramKey.addEventListener("input", () => {
+  setSessionKey("deepgram", deepgramKey.value);
+  syncAsrSettingsUi();
+  allowCloudAudioWhenChosen();
+});
+
+deepgramKeyToggle.addEventListener("click", () => {
+  const showing = deepgramKey.type === "text";
+  deepgramKey.type = showing ? "password" : "text";
+  deepgramKeyToggle.textContent = showing ? "Show" : "Hide";
+  deepgramKeyToggle.setAttribute("aria-pressed", String(!showing));
+});
+
+deepgramRemember.addEventListener("change", () => {
+  const key = deepgramKey.value.trim();
+  if (!deepgramRemember.checked) {
+    showToast("The Deepgram key stays in this tab only");
+    return;
+  }
+  if (rememberState() !== "unlocked") {
+    deepgramRemember.checked = false;
+    showToast(
+      "Unlock your vault in AI notes first, then this key can be remembered",
+    );
+    return;
+  }
+  if (!key) {
+    deepgramRemember.checked = false;
+    showToast("Paste the Deepgram key first");
+    return;
+  }
+  void updateVault((entries) => {
+    entries.deepgram = key;
+  })
+    .then(() => showToast("Deepgram key encrypted in the vault"))
+    .catch(() => {
+      deepgramRemember.checked = false;
+      showToast("The key could not be saved to the vault");
+    });
 });
 
 /* ---- AI notes settings ---------------------------------------------- */
@@ -688,13 +879,17 @@ migratePlaintextKeys();
 syncPrivacyState();
 syncPrepareModel();
 syncAiSettingsUi();
+syncAsrSettingsUi();
+/* A key restored from this session means the user already chose a cloud
+   engine; do not leave it blocked behind the local-only default. */
+allowCloudAudioWhenChosen();
 setView("library");
 setMeetingState("idle");
 syncAutoscrollButton();
 /* Load Whisper now rather than after the user has picked a screen: by the
    time a meeting starts the model is normally already in memory. */
 if (initialSupport.supported) {
-  const preload = () => void ensureWhisperModel();
+  const preload = () => syncAsrProviderFromCapture();
   const idleWindow = window as Window & {
     requestIdleCallback?: (
       callback: () => void,
@@ -759,9 +954,11 @@ async function handleStart(): Promise<void> {
     renderTranscript(
       undefined,
       [],
-      modelState === "ready"
-        ? "Listening for the first words…"
-        : "Loading the English Whisper model locally…",
+      effectiveAsrProvider() === "deepgram"
+        ? "Connecting to Deepgram…"
+        : modelState === "ready"
+          ? "Listening for the first words…"
+          : "Loading the English Whisper model locally…",
     );
     liveLabel.textContent = "Recording";
     modelStatus.textContent = modelInput.value;
@@ -778,51 +975,80 @@ async function handleStart(): Promise<void> {
     lastRollingAt = 0;
     rollingInFlight = false;
     syncAiStatusSummary();
-    /* Capture first so the display prompt keeps its user gesture, then make
-       sure the model is ready. It normally already is. */
-    const client = await ensureWhisperModel();
-    if (!client) {
-      throw new Error(
-        modelError ||
-          "The Whisper model could not be loaded. Use “Reload model” and try again.",
+    const provider = effectiveAsrProvider();
+    const onState = (value: string) => {
+      stateElement.textContent = value;
+      const loading = /loading|download|connecting/i.test(value);
+      notesSkeleton.classList.toggle("hidden", !loading);
+      if (!loading && latestSegments.length === 0)
+        stateElement.textContent = value;
+    };
+    const onSegment = (segment: TranscriptSegment, all: TranscriptSegment[]) => {
+      latestSegments = all;
+      notesSkeleton.classList.add("hidden");
+      clearInterimTranscript();
+      renderTranscript(segment, all);
+      void updateIntelligence();
+      void persistCurrentMeeting();
+    };
+    const onLag = (lag: number) => {
+      transcriptionLag.textContent = `${Math.round(lag)} ms`;
+    };
+    const localCallbacks: TranscriptionCallbacks = {
+      onState,
+      onSegment,
+      onLag,
+      onDiagnostics: handleTranscriptionDiagnostics,
+      onError: showError,
+    };
+
+    if (provider === "deepgram") {
+      const cloud: MeetingTranscriber = new DeepgramController(
+        {
+          apiKey: deepgramKeyValue(),
+          model: currentAsrSettings().deepgramModel,
+          language: currentAsrSettings().language,
+        },
+        {
+          onState,
+          onSegment,
+          onLag,
+          onError: showError,
+          onInterim: renderInterimTranscript,
+          onFatal: (message: string) => void fallBackToLocalTranscription(message),
+        },
       );
+      transcription = cloud;
+      try {
+        await cloud.start(capture);
+        activeEngine = "deepgram";
+        transcriptionLag.textContent = "—";
+      } catch (error) {
+        /* Starting the cloud engine failed: keep the meeting and use local. */
+        await cloud.stop().catch(() => undefined);
+        const local = await startLocalTranscription(localCallbacks);
+        if (!local) throw error;
+        transcription = local;
+        activeEngine = "local";
+        showError(
+          error instanceof Error
+            ? `${error.message} Continuing with local Whisper.`
+            : "Deepgram could not start. Continuing with local Whisper.",
+        );
+        await local.start(capture);
+      }
+    } else {
+      const local = await startLocalTranscription(localCallbacks);
+      if (!local) {
+        throw new Error(
+          modelError ||
+            "The Whisper model could not be loaded. Use “Reload model” and try again.",
+        );
+      }
+      transcription = local;
+      activeEngine = "local";
+      await local.start(capture);
     }
-    transcription = new TranscriptionController(
-      {
-        model: activeModelId(),
-        chunkDurationMs: clampNumber(chunkInput.value, 2, 30, 6) * 1000,
-        overlapMs: clampNumber(overlapInput.value, 0, 10, 2) * 1000,
-        /* Only true digital silence should be skipped. This used to be 0.008,
-           which is loud enough that quiet meeting audio (a distant laptop
-           microphone, system audio at half volume) was dropped window after
-           window with no feedback at all. */
-        silenceRmsThreshold: 0.0015,
-        language: "en",
-      },
-      {
-        onState: (value) => {
-          stateElement.textContent = value;
-          const loading = /loading|download/i.test(value);
-          notesSkeleton.classList.toggle("hidden", !loading);
-          if (!loading && latestSegments.length === 0)
-            stateElement.textContent = value;
-        },
-        onSegment: (segment, all) => {
-          latestSegments = all;
-          notesSkeleton.classList.add("hidden");
-          renderTranscript(segment, all);
-          void updateIntelligence();
-          void persistCurrentMeeting();
-        },
-        onLag: (lag) => {
-          transcriptionLag.textContent = `${Math.round(lag)} ms`;
-        },
-        onDiagnostics: handleTranscriptionDiagnostics,
-        onError: showError,
-      },
-      client,
-    );
-    await transcription.start(capture);
     notesSkeleton.classList.add("hidden");
     startButton.classList.add("hidden");
     startIconButton.classList.add("hidden");
@@ -831,9 +1057,12 @@ async function handleStart(): Promise<void> {
     stopButton.classList.remove("hidden");
     stopIconButton.classList.remove("hidden");
     livePill.className = "live-pill is-live";
-    livePill.textContent = privacyMode.checked
-      ? "Transcribing locally"
-      : "Transcribing locally · AI ready";
+    livePill.textContent =
+      activeEngine === "deepgram"
+        ? "Live · Deepgram"
+        : privacyMode.checked
+          ? "Transcribing locally"
+          : "Transcribing locally · AI ready";
     capture.display
       .getVideoTracks()[0]
       ?.addEventListener(
@@ -1538,6 +1767,105 @@ function renderTranscript(
   if (latest && autoscrollEnabled) scrollTranscriptToEnd();
 }
 
+/** Builds the local (Whisper) engine, loading the model if needed. */
+async function startLocalTranscription(
+  callbacks: TranscriptionCallbacks,
+): Promise<TranscriptionController | null> {
+  const client = await ensureWhisperModel();
+  if (!client) return null;
+  return new TranscriptionController(
+    {
+      model: activeModelId(),
+      chunkDurationMs: clampNumber(chunkInput.value, 2, 30, 6) * 1000,
+      overlapMs: clampNumber(overlapInput.value, 0, 10, 2) * 1000,
+      /* Only true digital silence should be skipped. This used to be 0.008,
+         which is loud enough that quiet meeting audio (a distant laptop
+         microphone, system audio at half volume) was dropped window after
+         window with no feedback at all. */
+      silenceRmsThreshold: 0.0015,
+      language: "en",
+    },
+    callbacks,
+    client,
+  );
+}
+
+/**
+ * A cloud failure mid-meeting must not cost the user their transcript: the
+ * Deepgram engine is stopped and the local one takes over the same capture.
+ */
+async function fallBackToLocalTranscription(message: string): Promise<void> {
+  if (!capture || !transcription || recovering) return;
+  recovering = true;
+  try {
+    await transcription.stop().catch(() => undefined);
+    transcription = null;
+    const local = await startLocalTranscription({
+      onState: (value) => {
+        stateElement.textContent = value;
+      },
+      onSegment: (segment, all) => {
+        latestSegments = all;
+        clearInterimTranscript();
+        renderTranscript(segment, all);
+        void updateIntelligence();
+        void persistCurrentMeeting();
+      },
+      onLag: (lag) => {
+        transcriptionLag.textContent = `${Math.round(lag)} ms`;
+      },
+      onDiagnostics: handleTranscriptionDiagnostics,
+      onError: showError,
+    });
+    if (!local) {
+      showError(`${message} Local Whisper is unavailable too.`);
+      return;
+    }
+    transcription = local;
+    activeEngine = "local";
+    await local.start(capture);
+    livePill.textContent = "Transcribing locally";
+    showToast(`${message} Switched to local Whisper.`);
+  } catch (error) {
+    showError(
+      error instanceof Error
+        ? error.message
+        : "Could not switch to local transcription.",
+    );
+  } finally {
+    recovering = false;
+  }
+}
+
+/** Live, not-yet-final words from a streaming engine. */
+function renderInterimTranscript(text: string): void {
+  const trimmed = text.trim();
+  const existing = transcriptOutput.querySelector(".transcript-interim");
+  if (!trimmed) {
+    existing?.remove();
+    return;
+  }
+  const row = (existing as HTMLElement | null) ?? document.createElement("div");
+  row.className = "transcript-segment transcript-interim";
+  const stamp = document.createElement("time");
+  stamp.textContent = "live";
+  const body = document.createElement("div");
+  const source = document.createElement("span");
+  source.className = "transcript-speaker";
+  source.textContent = "Room audio";
+  const paragraph = document.createElement("p");
+  paragraph.textContent = trimmed;
+  body.append(source, paragraph);
+  row.textContent = "";
+  row.append(stamp, body);
+  if (!existing) transcriptOutput.append(row);
+  if (autoscrollEnabled) scrollTranscriptToEnd();
+}
+
+function clearInterimTranscript(): void {
+  transcriptOutput.querySelector(".transcript-interim")?.remove();
+}
+
 /* ============================================================
    Shell behaviour
    ============================================================ */
@@ -1564,7 +1892,8 @@ function setView(view: ViewName): void {
   if (changed) window.scrollTo(0, 0);
   /* The prepare screen owns the Start button, so make sure the model is on its
      way (or already loaded) as soon as it is opened. */
-  if (view === "prepare" && initialSupport.supported) void ensureWhisperModel();
+  if (view === "prepare" && initialSupport.supported)
+    syncAsrProviderFromCapture();
 }
 
 function setMeetingState(state: MeetingState): void {
@@ -1900,6 +2229,9 @@ async function runVaultAction(): Promise<void> {
     syncRememberCheckbox();
     refreshVaultPanel();
     syncAiSettingsUi();
+    /* The vault may now hold a Deepgram key that was not readable before. */
+    syncAsrSettingsUi();
+    allowCloudAudioWhenChosen();
   } catch (error) {
     setVaultStatus(
       error instanceof Error ? error.message : "The vault could not be opened.",

@@ -648,6 +648,99 @@
 
             <section class="settings-block">
               <section
+                class="asr-settings"
+                id="asr-settings"
+                aria-labelledby="asr-settings-heading"
+              >
+                <h2 id="asr-settings-heading">Speech-to-text</h2>
+                <p class="settings-copy">
+                  How meeting audio becomes text. Deepgram streams audio to its
+                  servers for real-time results; local Whisper runs entirely in
+                  this browser.
+                </p>
+
+                <div class="field-grid">
+                  <label class="field" for="asr-provider">
+                    Engine
+                    <select id="asr-provider">
+                      <option value="deepgram">
+                        Deepgram — real-time, cloud
+                      </option>
+                      <option value="local">
+                        Local Whisper — offline
+                      </option>
+                    </select>
+                  </label>
+                  <label class="field" for="deepgram-model">
+                    Deepgram model
+                    <input
+                      id="deepgram-model"
+                      list="deepgram-model-options"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <datalist id="deepgram-model-options"></datalist>
+                  </label>
+                </div>
+
+                <label class="field" for="deepgram-language">
+                  Spoken language
+                  <select id="deepgram-language"></select>
+                </label>
+
+                <div class="field" id="deepgram-key-field">
+                  <label id="deepgram-key-label" for="deepgram-key"
+                    >Deepgram API key</label
+                  >
+                  <span class="key-row">
+                    <input
+                      id="deepgram-key"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Paste your Deepgram key"
+                    />
+                    <button
+                      id="deepgram-key-toggle"
+                      class="btn btn-quiet btn-compact"
+                      type="button"
+                      aria-pressed="false"
+                    >
+                      Show
+                    </button>
+                  </span>
+                  <small class="field-hint"
+                    >Used straight from this browser. The key travels in a
+                    WebSocket header, never in a URL.</small
+                  >
+                </div>
+
+                <label class="check-row" for="deepgram-remember">
+                  <input id="deepgram-remember" type="checkbox" />
+                  <span>
+                    <strong>Remember this key on this device</strong>
+                    <small
+                      >Stored in the same encrypted vault as your AI keys. The
+                      vault must be unlocked first.</small
+                    >
+                  </span>
+                </label>
+
+                <p class="field-hint" id="asr-summary" role="status"></p>
+                <p
+                  class="notice notice-warning hidden"
+                  id="asr-local-only-note"
+                  role="status"
+                >
+                  <span
+                    >Local-only mode is on, so Whisper runs in this browser and
+                    no audio is uploaded. Turn it off to use a cloud
+                    engine.</span
+                  >
+                </p>
+              </section>
+
+              <section
                 class="ai-settings hidden"
                 id="ai-settings"
                 aria-labelledby="ai-settings-heading"

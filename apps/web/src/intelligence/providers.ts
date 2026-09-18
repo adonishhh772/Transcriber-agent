@@ -24,7 +24,18 @@
  */
 
 export type ProviderId =
-  "deepseek" | "openai" | "anthropic" | "gemini" | "openrouter" | "custom";
+  | "deepseek"
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "openrouter"
+  | "custom"
+  /**
+   * Speech-to-text vendor. Not an AI-notes provider — it is absent from
+   * `PROVIDERS` on purpose, and only uses the shared key storage so a Deepgram
+   * key is handled exactly like the others (session memory, optional vault).
+   */
+  | "deepgram";
 
 export type WireFormat = "chat-completions" | "anthropic-messages" | "gemini";
 

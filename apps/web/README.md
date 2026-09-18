@@ -58,6 +58,28 @@ Four views share one shell (navigation rail + main region):
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, and a non-blocking provider error with Retry.
 5. **Settings** — Privacy (local-only mode), AI notes (provider, model, key, test, forget) and Transcription (Whisper model, chunk, overlap).
 
+## Real-time transcription with Deepgram
+
+`Settings → Speech-to-text` chooses the engine:
+
+- **Deepgram (default once a key is present)** — the browser opens a WebSocket
+  straight to `wss://api.deepgram.com/v1/listen` with the user's key (sent as
+  the `token` sub-protocol, so it never appears in a URL), streams 100 ms frames
+  of 16 kHz mono PCM16 from the mixed meeting audio, and renders interim words as
+  they are spoken. Final results carry word timestamps and become ordinary
+  transcript segments, so notes, search, history and export are unchanged.
+  Nothing is downloaded or compiled, so a meeting starts instantly.
+- **Local Whisper** — offline, nothing leaves the device, updates every few
+  seconds.
+
+Choosing Deepgram turns local-only mode off (a cloud engine has to receive
+audio) and the settings copy says so. If the socket cannot be established, or
+drops repeatedly, the app reports why and **continues the meeting on local
+Whisper** instead of losing the transcript. The Deepgram key lives in the same
+key store as the AI keys: session memory by default, or the encrypted vault when
+it is unlocked. Audio is billed by Deepgram per minute; their free credit covers
+thousands of minutes.
+
 ## AI notes without a backend (bring your own key)
 
 The frontend can generate the same notes as the FastAPI service — `{title, executiveSummary, keyPoints, decisions, actionItems, questions}` — by calling a model provider directly. Keys are entered in Settings and stored only in this browser's `localStorage`; they are never written to IndexedDB meeting records, never included in Markdown exports, and never sent anywhere except the chosen provider.

@@ -1,8 +1,16 @@
+export type TranscriptWord = {
+  w: string;
+  t: number;
+  end: number;
+};
+
 export type TranscriptSegment = {
   text: string;
   startMs: number;
   endMs: number;
   confidence?: number;
+  /** Word-level timings when the engine provides them (Deepgram does). */
+  words?: TranscriptWord[];
 };
 
 export function normalizeTranscriptText(text: string): string {
