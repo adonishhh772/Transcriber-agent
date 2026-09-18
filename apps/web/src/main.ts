@@ -1381,7 +1381,9 @@ async function handleStop(message?: string): Promise<void> {
   livePill.textContent = "Completed";
   liveLabel.textContent = "Recording";
   liveControls.classList.remove("is-paused");
-  stateElement.textContent = "Completed · transcript saved locally";
+  stateElement.textContent = latestSegments.length
+    ? "Completed · transcript saved locally"
+    : "Completed · no speech was transcribed";
   if (intelligenceTimer !== null) {
     window.clearTimeout(intelligenceTimer);
     intelligenceTimer = null;
@@ -1633,24 +1635,53 @@ function currentAiConfig(): AiConfig {
   return toAiConfig(loadAiSettings());
 }
 
+/** A meeting shorter than this, with nothing in it, is not worth a row. */
+const MIN_EMPTY_MEETING_MS = 5_000;
+
+/**
+ * Saves the running meeting.
+ *
+ * This used to require at least one transcript segment, which quietly threw away
+ * whole meetings: a silent room, a meeting where only slides were shared, or one
+ * where somebody typed notes without speaking never reached the library at all.
+ * Anything the meeting produced is enough now — words, screen captures, typed
+ * notes or audio — and a meeting that simply ran for a while is kept too, so
+ * "where did my meeting go?" has one answer.
+ */
 async function persistCurrentMeeting(): Promise<void> {
-  if (!meetingStartedAt || latestSegments.length === 0) return;
-  await saveMeeting({
-    id: sessionId,
-    title: meetingTitle,
-    startedAt: meetingStartedAt,
-    durationMs: Date.now() - meetingStartedAt,
-    transcript: latestSegments,
-    manualNotes: manualNotes.value,
-    generatedNotes: latestGeneratedNotes,
-    summary: latestSummary,
-    updatedAt: Date.now(),
-    hasAudio: audioBytes > 0,
-    screenNotes: screenNotes.length ? screenNotes : undefined,
-    aiActivity: aiActivity.length ? aiActivity : undefined,
-    qa: askThread.length ? askThread : undefined,
-  });
-  await loadHistory();
+  if (!meetingStartedAt) return;
+  const durationMs = Date.now() - meetingStartedAt;
+  const hasContent =
+    latestSegments.length > 0 ||
+    screenNotes.length > 0 ||
+    manualNotes.value.trim().length > 0 ||
+    audioBytes > 0;
+  if (!hasContent && durationMs < MIN_EMPTY_MEETING_MS) return;
+  try {
+    await saveMeeting({
+      id: sessionId,
+      title: meetingTitle,
+      startedAt: meetingStartedAt,
+      durationMs,
+      transcript: latestSegments,
+      manualNotes: manualNotes.value,
+      generatedNotes: latestGeneratedNotes,
+      summary: latestSummary,
+      updatedAt: Date.now(),
+      hasAudio: audioBytes > 0,
+      screenNotes: screenNotes.length ? screenNotes : undefined,
+      aiActivity: aiActivity.length ? aiActivity : undefined,
+      qa: askThread.length ? askThread : undefined,
+    });
+    await loadHistory();
+  } catch (error) {
+    /* Silently dropping a meeting is the worst outcome here, so say so. */
+    showError(
+      `This meeting could not be saved to this browser (${
+        error instanceof Error ? error.message : "storage error"
+      }). Export it before closing the tab.`,
+    );
+  }
 }
 
 async function loadHistory(): Promise<void> {
@@ -1665,10 +1696,15 @@ async function loadHistory(): Promise<void> {
 }
 
 function renderHistory(): void {
+  const query = historySearch.value.trim();
   const meetings = searchMeetings(savedMeetings, historySearch.value);
   historyList.textContent = "";
   if (!meetings.length) {
-    historyList.append(buildEmptyState());
+    /* A filter that hides everything must not look like an empty library: that
+       is how a saved meeting appears to have vanished. */
+    historyList.append(
+      query ? buildNoMatchesState(query) : buildEmptyState(),
+    );
     return;
   }
   const groups = new Map<string, MeetingRecord[]>();
@@ -1728,6 +1764,35 @@ function buildEmptyState(): HTMLElement {
   return wrapper;
 }
 
+/** Shown when a search query matches nothing, rather than the welcome state. */
+function buildNoMatchesState(query: string): HTMLElement {
+  const wrapper = document.createElement("section");
+  wrapper.className = "empty-state";
+
+  const heading = document.createElement("h2");
+  heading.textContent = `No meeting matches “${query}”.`;
+
+  const copy = document.createElement("p");
+  const total = savedMeetings.length;
+  copy.textContent = total
+    ? `${total} saved ${total === 1 ? "meeting is" : "meetings are"} hidden by this search.`
+    : "Nothing has been saved in this browser yet.";
+
+  const action = document.createElement("button");
+  action.type = "button";
+  action.className = "btn btn-quiet";
+  action.innerHTML =
+    '<svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>';
+  action.append("Clear search");
+  action.addEventListener("click", () => {
+    historySearch.value = "";
+    renderHistory();
+  });
+
+  wrapper.append(heading, copy, action);
+  return wrapper;
+}
+
 function buildMeetingRow(meeting: MeetingRecord): HTMLElement {
   const row = document.createElement("article");
   row.className = "meeting-row";
@@ -1748,7 +1813,7 @@ function buildMeetingRow(meeting: MeetingRecord): HTMLElement {
   excerpt.textContent =
     meeting.manualNotes.trim() ||
     summarizeMeeting(meeting) ||
-    `${meeting.transcript.length} transcript segments`;
+    describeEmptyMeeting(meeting);
   copy.append(title, excerpt);
 
   const meta = document.createElement("div");
@@ -1761,8 +1826,13 @@ function buildMeetingRow(meeting: MeetingRecord): HTMLElement {
   const hasSummary = Boolean(
     meeting.summary ?? Object.keys(meeting.generatedNotes ?? {}).length,
   );
+  const hasTranscript = meeting.transcript.length > 0;
   flag.className = `row-flag${hasSummary ? "" : " is-draft"}`;
-  flag.textContent = hasSummary ? "Notes ready" : "Transcript only";
+  flag.textContent = hasSummary
+    ? "Notes ready"
+    : hasTranscript
+      ? "Transcript only"
+      : "Nothing captured";
   meta.append(when, length, flag);
 
   const actions = document.createElement("div");
@@ -1807,6 +1877,23 @@ function summarizeMeeting(meeting: MeetingRecord): string {
   return meeting.transcript[0]?.text ?? "";
 }
 
+/**
+ * What to say about a meeting with no words of its own.
+ *
+ * "0 transcript segments" told the user nothing; a meeting that only shared a
+ * screen, or only kept audio, should say exactly that.
+ */
+function describeEmptyMeeting(meeting: MeetingRecord): string {
+  const parts: string[] = [];
+  const captures = meeting.screenNotes?.length ?? 0;
+  if (captures === 1) parts.push("1 screen capture");
+  else if (captures > 1) parts.push(`${captures} screen captures`);
+  if (meeting.hasAudio) parts.push("audio kept");
+  if (parts.length)
+    return `No speech transcribed · ${parts.join(" · ")}`;
+  return "No speech was transcribed in this meeting";
+}
+
 async function removeMeeting(id: string): Promise<void> {
   await deleteMeeting(id);
   await loadHistory();
@@ -1826,7 +1913,11 @@ function openMeeting(id: string): void {
   latestGeneratedNotes = meeting.generatedNotes;
   latestSummary = meeting.summary;
   recovering = true;
-  renderTranscriptPlaceholder("");
+  renderTranscriptPlaceholder(
+    latestSegments.length
+      ? ""
+      : "No speech was transcribed in this meeting.",
+  );
   appendTranscript(latestSegments);
   screenNotes = meeting.screenNotes ?? [];
   for (const note of screenNotes) appendScreenNote(note);
@@ -2077,8 +2168,9 @@ function appendTranscript(all: TranscriptSegment[]): void {
     resetTranscript("");
     renderedSegments = 0;
   }
+  /* With nothing to append, an explanatory line is all the panel has. */
   const placeholder = transcriptOutput.querySelector(".transcript-empty");
-  if (placeholder) placeholder.remove();
+  if (placeholder && all.length > 0) placeholder.remove();
 
   for (let index = renderedSegments; index < all.length; index += 1)
     transcriptOutput.append(transcriptRow(all[index]));
