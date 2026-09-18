@@ -28,7 +28,11 @@ import {
 } from "./asr/asrSettings";
 import type { MeetingTranscriber } from "./asr/types";
 import { MeetingRecorder, formatBytes, recordingSupported } from "./audio/recorder";
-import { SCREEN_PROMPT, ScreenReader } from "./screen/screenReader";
+import {
+  SCREEN_PROMPT,
+  ScreenReader,
+  type ScreenSummary,
+} from "./screen/screenReader";
 import { WhisperClient } from "./asr/whisperClient";
 import type { TranscriptSegment } from "./transcript/dedup";
 import { exportMarkdown } from "./backend/intelligence";
@@ -133,6 +137,9 @@ const deepgramKeyToggle = $("deepgram-key-toggle") as HTMLButtonElement;
 const asrSummary = $("asr-summary");
 const recordAudioToggle = $("record-audio") as HTMLInputElement;
 const readScreenToggle = $("read-screen") as HTMLInputElement;
+const keepScreenImagesToggle = $(
+  "keep-screen-images",
+) as HTMLInputElement;
 const screenStatus = $("screen-status");
 /* Live bar (outside every view, so a running meeting stays visible) */
 const returnButton = $("return-button") as HTMLButtonElement;
@@ -202,6 +209,7 @@ const framePreview = $("frame-preview");
 const framePreviewImage = $("frame-preview-image") as HTMLImageElement;
 const framePreviewTime = $("frame-preview-time");
 const framePreviewText = $("frame-preview-text");
+const framePreviewNote = $("frame-preview-note");
 const framePreviewClose = $("frame-preview-close") as HTMLButtonElement;
 const panel = $("panel");
 const panelToggle = $("panel-toggle") as HTMLButtonElement;
@@ -334,7 +342,7 @@ let audioUrl: string | null = null;
 let audioBytes = 0;
 /** Screen reading for the running meeting. */
 let screenReader: ScreenReader | null = null;
-let screenNotes: Array<{ atMs: number; text: string }> = [];
+let screenNotes: ScreenSummary[] = [];
 let screenErrorShown = false;
 /** Changelog of every AI suggestion, oldest first. */
 let aiActivity: AiActivityEntry[] = [];
@@ -377,6 +385,7 @@ function syncAsrSettingsUi(): void {
   recordAudioToggle.checked = settings.recordAudio;
   recordAudioToggle.disabled = !recordingSupported();
   readScreenToggle.checked = settings.readScreen;
+  keepScreenImagesToggle.checked = settings.keepScreenImages;
   syncScreenHint();
   asrSummary.textContent = describeAsrProvider(settings, {
     localOnly: privacyMode.checked,
@@ -880,6 +889,15 @@ readScreenToggle.addEventListener("change", () => {
   syncScreenHint();
 });
 
+keepScreenImagesToggle.addEventListener("change", () => {
+  const settings = currentAsrSettings();
+  settings.keepScreenImages = keepScreenImagesToggle.checked;
+  saveAsrSettings(settings);
+  if (keepScreenImagesToggle.checked) syncScreenHint();
+  else
+    showToast("Captures from now on are text only; earlier frames stay saved");
+});
+
 /* ---- AI notes settings ---------------------------------------------- */
 for (const provider of PROVIDERS) {
   const option = document.createElement("option");
@@ -1306,7 +1324,10 @@ async function handleStart(): Promise<void> {
 
 /** Recent screen descriptions, bounded so a long meeting cannot bloat a prompt. */
 function recentScreenNotes(): Array<{ atMs: number; text: string }> {
-  return screenNotes.slice(-10);
+  /* Text only: a stored thumbnail must never travel in a prompt. */
+  return screenNotes
+    .slice(-10)
+    .map((note) => ({ atMs: note.atMs, text: note.text }));
 }
 
 function handlePauseResume(): void {
@@ -2256,6 +2277,9 @@ function startScreenReading(streams: CaptureStreams): void {
   if (streams.display.getVideoTracks().length === 0) return;
 
   const reader = new ScreenReader({
+    /* The thumbnail is the only screen picture that is written down, so it is
+       opt-out rather than always-on. */
+    thumbnails: currentAsrSettings().keepScreenImages,
     describe: (dataUrl) =>
       describeScreen(currentAiConfig(), SCREEN_PROMPT, dataUrl),
     onSummary: (summary) => {
@@ -2302,7 +2326,7 @@ function startScreenReading(streams: CaptureStreams): void {
   }
 }
 
-function appendScreenNote(note: { atMs: number; text: string }): void {
+function appendScreenNote(note: ScreenSummary): void {
   const row = document.createElement("div");
   row.className = "transcript-segment transcript-screen";
   const stamp = document.createElement("time");
@@ -2315,7 +2339,24 @@ function appendScreenNote(note: { atMs: number; text: string }): void {
   source.textContent = "Shared screen";
   const text = document.createElement("p");
   text.textContent = note.text;
-  body.append(source, text);
+  body.append(source);
+  /* The frame itself, when the meeting kept one: click it to see it properly. */
+  if (note.thumbnail) {
+    const shot = document.createElement("button");
+    shot.className = "transcript-thumb";
+    shot.type = "button";
+    shot.title = "Open this capture";
+    shot.setAttribute("aria-label", `Open the capture from ${stamp.textContent}`);
+    const image = document.createElement("img");
+    image.src = note.thumbnail;
+    image.alt = "";
+    shot.append(image);
+    shot.addEventListener("click", () =>
+      openFramePreview(note.thumbnail!, note),
+    );
+    body.append(shot);
+  }
+  body.append(text);
   row.append(stamp, body);
   const placeholder = transcriptOutput.querySelector(".transcript-empty");
   if (placeholder) placeholder.remove();
@@ -2330,6 +2371,10 @@ function appendScreenNote(note: { atMs: number; text: string }): void {
 
 /** The description the bar is showing, so the preview can label its frame. */
 let latestCapture: { atMs: number; text: string } | null = null;
+/** What the preview is showing, and whether it came from storage. */
+let previewFrame: string | null = null;
+let previewNote: { atMs: number; text: string } | null = null;
+let previewStored = false;
 
 /**
  * Shows the newest screen description in the live bar.
@@ -2364,25 +2409,43 @@ function clearScreenCapture(): void {
   floatScreenSep?.classList.add("hidden");
 }
 
-/** Puts the current frame and its description into the open preview. */
+/** Puts a frame and its description into the open preview. */
 function paintFramePreview(): void {
-  const frame = screenReader?.lastFrame ?? null;
-  const note = latestCapture;
-  if (!frame || !note) {
+  if (!previewFrame || !previewNote) {
     closeFramePreview();
     return;
   }
-  framePreviewImage.src = frame;
-  framePreviewTime.textContent = formatDuration(Math.floor(note.atMs / 1000));
-  framePreviewText.textContent = note.text;
+  framePreviewImage.src = previewFrame;
+  framePreviewTime.textContent = formatDuration(
+    Math.floor(previewNote.atMs / 1000),
+  );
+  framePreviewText.textContent = previewNote.text;
+  if (framePreviewNote)
+    framePreviewNote.textContent = previewStored
+      ? "The picture saved with this meeting — never uploaded."
+      : "The frame sent to the model, held in memory for this meeting only — never saved.";
 }
 
-function openFramePreview(): void {
-  const frame = screenReader?.lastFrame ?? null;
-  if (!frame || !latestCapture) {
+/**
+ * Opens the preview for one capture.
+ *
+ * Without arguments it shows the newest frame the reader still holds; a
+ * transcript row passes the thumbnail it kept, which is all that survives a
+ * reload.
+ */
+function openFramePreview(
+  frame?: string,
+  note?: { atMs: number; text: string },
+): void {
+  const source = frame ?? screenReader?.lastFrame ?? null;
+  const description = note ?? latestCapture;
+  if (!source || !description) {
     showToast("That frame is no longer in memory");
     return;
   }
+  previewFrame = source;
+  previewNote = description;
+  previewStored = Boolean(frame);
   framePreview.classList.remove("hidden");
   paintFramePreview();
 }
@@ -2390,6 +2453,8 @@ function openFramePreview(): void {
 /** Drops the decoded image as well as hiding it: memory only means memory only. */
 function closeFramePreview(): void {
   if (!framePreview) return;
+  previewFrame = null;
+  previewNote = null;
   framePreview.classList.add("hidden");
   framePreviewImage.removeAttribute("src");
   framePreviewTime.textContent = "";
@@ -2582,10 +2647,6 @@ document.addEventListener("pointerdown", (event) => {
    ============================================================ */
 
 function setView(view: ViewName): void {
-  if (!viewIsReachable(view)) {
-    showToast("End the meeting to leave the meeting screen");
-    return;
-  }
   const changed = document.body.dataset.view !== view;
   for (const [name, element] of Object.entries(views))
     element.classList.toggle("hidden", name !== view);
@@ -2614,17 +2675,9 @@ function setView(view: ViewName): void {
 
 function setMeetingState(state: MeetingState): void {
   document.body.dataset.meetingState = state;
-  /* A running meeting owns the window: the rail disappears, and the library and
-     settings are out of reach until it ends. The bar lives outside the views:
-     it tracks the meeting, not the page. */
-  document.body.classList.toggle("is-meeting-live", state === "live");
+  /* The bar lives outside the views: it tracks the meeting, not the page. */
   liveControls.classList.toggle("hidden", state !== "live");
   syncReturnButton();
-}
-
-/** Whether a view may be opened while a meeting is running. */
-function viewIsReachable(view: ViewName): boolean {
-  return document.body.dataset.meetingState !== "live" || view === "workspace";
 }
 
 /** Offers a way back to the meeting while it runs on another page. */

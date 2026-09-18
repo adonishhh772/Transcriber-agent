@@ -309,12 +309,6 @@ dt {
   min-width: 0;
 }
 
-/* A running meeting owns the window: the rail would only be a way out of it,
-   so it is hidden rather than merely collapsed. */
-body.is-meeting-live .rail {
-  display: none;
-}
-
 .rail.is-collapsed {
   flex-basis: 76px;
   width: 76px;
@@ -2164,6 +2158,37 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   color: var(--text-muted);
   font-size: 0.8rem;
   line-height: 1.6;
+}
+
+/* The kept frame inside a "Shared screen" transcript row. */
+.transcript-thumb {
+  display: block;
+  width: 148px;
+  margin: 7px 0 6px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-secondary);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color var(--t-fast),
+    transform var(--t-fast);
+}
+
+.transcript-thumb img {
+  display: block;
+  width: 100%;
+}
+
+.transcript-thumb:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.transcript-thumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .ai-output {

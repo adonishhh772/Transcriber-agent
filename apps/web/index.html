@@ -545,7 +545,7 @@
                 </span>
                 <span class="setup-label">
                   <strong>Display surface</strong>
-                  <small>Share Entire Screen for meeting audio</small>
+                  <small>Share the meeting window or its tab</small>
                 </span>
                 <strong
                   id="display-surface"
@@ -591,9 +591,13 @@
                   <use href="#i-shield"></use>
                 </svg>
                 <span
-                  >Select <strong>Entire Screen</strong> and enable
-                  <strong>Share system audio</strong> to capture Teams or
-                  Zoom.</span
+                  >In the picker, choose the <strong>meeting window</strong> (or
+                  its <strong>tab</strong> for a web meeting) and tick
+                  <strong>Share system audio</strong> / <strong
+                    >Share tab audio</strong
+                  >. A tab always carries audio and can only ever show that tab.
+                  Sharing <strong>Entire Screen</strong> also captures everything
+                  else on your desktop, and screen reading would see it all.</span
                 >
               </p>
 
@@ -880,6 +884,20 @@
                   </span>
                 </label>
                 <small class="field-hint" id="screen-status"></small>
+
+                <label class="check-row" for="keep-screen-images">
+                  <input id="keep-screen-images" type="checkbox" checked />
+                  <span>
+                    <strong>Keep the frame with each capture</strong>
+                    <small
+                      >Stores a small copy (about 10 KB) of each capture with the
+                      meeting, so the transcript shows what was on screen and you
+                      can open it later. It stays in this browser, is deleted
+                      with the meeting, and is never uploaded. Turn this off and
+                      captures are text only.</small
+                    >
+                  </span>
+                </label>
 
                 <div id="ai-custom" class="hidden">
                   <label class="field" for="backend-url">
@@ -1589,7 +1607,7 @@
               alt="The frame the vision model read"
             />
             <p class="frame-preview-text" id="frame-preview-text"></p>
-            <p class="frame-preview-note">
+            <p class="frame-preview-note" id="frame-preview-note">
               Held in memory for this meeting only — never saved.
             </p>
           </div>

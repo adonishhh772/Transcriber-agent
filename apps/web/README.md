@@ -46,13 +46,16 @@ the display track that also carries the meeting audio.
   the whole desktop. Sharing a tab or an entire screen is still allowed: a web
   meeting often lives in a tab, and Windows offers system audio most reliably for
   a monitor.
-- Nothing else on the machine is captured, there is no periodic desktop
-  screenshot, and the frame is never stored — downscaled to 640px, sent at most
-  every ~25 seconds and only when the picture changed, and reduced to a text
-  description that is kept with the meeting. The one exception is deliberate and
-  user-driven: clicking the capture chip in the live bar renders the newest frame
-  back from memory, so you can see exactly what was sent. It is not persisted,
-  and it is gone when the meeting ends.
+- Nothing else on the machine is captured, and there is no periodic desktop
+  screenshot: one frame every ~25 seconds, only when the picture changed,
+  downscaled to 640px and reduced to a text description. Two screen *images*
+  exist, and both are deliberately narrow:
+  - the frame the model just read, **in memory only**, shown when you click the
+    capture chip and dropped the moment the meeting ends;
+  - a small thumbnail (~3 KB, 320px wide) kept with each capture so the
+    transcript shows what was on screen and still shows it when you reopen the
+    meeting a week later. *Keep the frame with each capture* in Settings turns
+    that off; it is deleted with the meeting and never uploaded.
 - After the picker closes, the app says which surface it got: *"Screen reading is
   limited to the shared window"*, or, if the whole monitor was shared, a warning
   that everything on it — other windows included — is visible to the model.
@@ -93,12 +96,14 @@ viewport, so the newest description — with its `mm:ss` and the full text in th
 tooltip — stays visible with the panel closed, while AI activity is showing, or
 scrolled to the bottom of a long transcript. It clears when the meeting ends.
 
-Clicking the chip opens the frame the model actually read. That frame is the one
-that was sent (same 640px-wide JPEG), held **in memory only** for the meeting:
-it is never written to IndexedDB or localStorage, the preview drops the decoded
-image when it closes, and the reader discards it the moment it stops. A new
-capture replaces it; nothing survives the meeting. (Escape closes the preview
-without ending the meeting, which is what Escape otherwise does while capturing.)
+Clicking the chip opens the frame the model actually read, and a thumbnail in a
+`Shared screen` transcript row opens the picture saved with that capture. The
+chip holds the sent frame **in memory only** for the meeting: it is never written
+to IndexedDB or localStorage, the preview drops the decoded image when it closes,
+and the reader discards it the moment it stops. The thumbnails in the transcript
+are the stored ones, and they come back with the meeting. Escape closes the
+preview without ending the meeting, which is what Escape otherwise does while
+capturing.
 
 ## Requirements
 
@@ -136,11 +141,23 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, pause/resume, end meeting). While a meeting runs the workspace is the only screen: the navigation rail is hidden and the library and settings cannot be opened until the meeting ends.
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
 5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
 
-The settings page follows local-only mode. **Both tabs are cloud features** — a speech engine that streams audio away and a notes provider that receives text — so turning local-only mode on hides the tab row, both panels and the key vault, leaving Privacy and Local Whisper. That is also why the two capture switches live where they do: *Summarise shared screens* is a vision-model setting and sits with AI notes, while *Save the meeting audio* stays on this device and sits in the Privacy block, reachable either way.
+The settings page follows local-only mode. **Both tabs are cloud features** — a speech engine that streams audio away and a notes provider that receives text — so turning local-only mode on hides the tab row, both panels and the key vault, leaving Privacy and Local Whisper. That is also why the capture switches live where they do: *Summarise shared screens* and *Keep the frame with each capture* are vision-provider settings and sit with AI notes, while *Save the meeting audio* stays on this device and sits in the Privacy block, reachable either way.
+
+## What to pick in the share dialog
+
+Sharing a **window** is not impossible — Chrome's picker lists native app windows, so a desktop Teams or Zoom window can be shared on its own, and on Windows the same picker offers *Share system audio* for a window. What varies by platform is that audio: per [Chrome's own guidance](https://developer.chrome.com/blog/avoiding-oversharing-when-screen-sharing), tab audio is supported everywhere while system and window audio are platform-dependent, and the picker has defaulted to **tabs** since Chrome 107 precisely because screens are the least private option — a shared screen exposes the clock, notifications, other running apps, extensions and bookmarks.
+
+So, in order of preference:
+
+1. **A web meeting in a tab** — the tab always carries its own audio, and the capture can only ever show that tab.
+2. **The meeting window** — a desktop Teams/Zoom window on its own, with *Share system audio* ticked if the platform offers it.
+3. **Entire Screen** — only when the audio needs it. This is the one case where the vision model can see everything else on your desktop, which is why the app names the surface it was given and warns when it is the whole monitor.
+
+Screen reading cannot be restricted to "the meeting" by the app itself: the browser deliberately hands the choice to the user. The app narrows it as far as it can — no switching surfaces mid-meeting, never its own tab, and it names what it got.
 
 ### AI activity
 
@@ -315,7 +332,7 @@ npm run format
 ## Production review status
 
 - Capture cleanup stops display, microphone, mixed destination, and output tracks; disconnects Web Audio nodes; closes the AudioContext; and disposes the Whisper worker.
-- The display video track is never uploaded as video: when *Summarise shared screens* is on, the app draws one frame every ~25 seconds into a 640px-wide canvas, sends that downscaled JPEG to the configured vision model, and keeps only the returned text. Nothing is recorded, and the frame is discarded immediately.
+- The display video track is never uploaded as video: when *Summarise shared screens* is on, the app draws one frame every ~25 seconds into a 640px-wide canvas, sends that downscaled JPEG to the configured vision model, and keeps the returned text. The 320px thumbnail kept alongside it is local-only, deleted with the meeting, and sent nowhere.
 - System audio comes from the display audio track and microphone audio comes from the separate microphone stream, avoiding duplicate input selection.
 - Transcript rendering uses DOM text nodes rather than unsafe HTML interpolation. Markdown export contains text only.
 - IndexedDB schema version 4 adds `screenNotes`, `aiActivity` and `qa` to a meeting record. Future changes must increment `MEETING_SCHEMA_VERSION` and migrate records.
@@ -325,7 +342,7 @@ npm run format
 
 ## Known limitations
 
-- Chrome/Edge control which display surfaces expose system audio, and the app cannot restrict the picker to one surface — the choice belongs to the user. It can only refuse to switch surfaces mid-meeting, exclude its own tab, and say afterwards which surface it was given.
+- Chrome/Edge control which display surfaces expose system audio, and the app cannot restrict the picker to one surface — the choice belongs to the user. It can only refuse to switch surfaces mid-meeting, exclude its own tab, and say afterwards which surface it was given. Tab audio is supported on every platform; window and system audio are not, which is the one reason to share an entire screen.
 - The prototype keeps the video track for the transcript and, when screen summarising is on, for one downscaled frame every ~25 seconds. It never records video, never connects it to storage, and never uploads a frame when that setting is off (or in local-only mode, which refuses to read screens at all).
 - The browser can now send finalized transcript text to the optional FastAPI intelligence endpoint. Raw audio and display video are never uploaded; screen frames go to the configured vision provider only while *Summarise shared screens* is on, and only as a description is anything kept.
 - Browser Whisper support is intended for current Chrome/Edge builds with WebGPU; browsers without WebGPU use the WASM path. Performance observations should be recorded during manual testing as model download time, first-result latency, sustained transcription lag, and memory pressure.

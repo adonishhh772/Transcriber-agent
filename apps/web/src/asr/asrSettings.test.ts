@@ -29,6 +29,9 @@ describe("asr settings", () => {
     expect(settings.language).toBe("en");
     expect(settings.localModel).toContain("whisper");
     expect(settings.recordAudio).toBe(true);
+    expect(settings.readScreen).toBe(true);
+    /* Screenshots in the transcript are on by default, and opt-out. */
+    expect(settings.keepScreenImages).toBe(true);
   });
 
   it("round-trips a saved choice", () => {
@@ -39,9 +42,25 @@ describe("asr settings", () => {
       localModel: "Xenova/whisper-base",
       recordAudio: false,
       readScreen: false,
+      keepScreenImages: false,
     };
     saveAsrSettings(settings);
     expect(loadAsrSettings()).toEqual(settings);
+  });
+
+  it("keeps screen images on for a stored older choice", () => {
+    localStorage.setItem(
+      "gather.asr.v1",
+      JSON.stringify({
+        provider: "local",
+        deepgramModel: "nova-2",
+        language: "en",
+        localModel: "Xenova/whisper-tiny.en",
+        recordAudio: true,
+        readScreen: true,
+      }),
+    );
+    expect(loadAsrSettings().keepScreenImages).toBe(true);
   });
 });
 
@@ -53,6 +72,7 @@ describe("resolveAsrProvider", () => {
     localModel: "Xenova/whisper-tiny.en",
     recordAudio: true,
     readScreen: true,
+    keepScreenImages: true,
   };
 
   it("uses Deepgram when a key is present", () => {

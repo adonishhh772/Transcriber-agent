@@ -76,7 +76,8 @@ function installDom(initialLuma: number) {
       contexts.push(context);
       return context;
     },
-    toDataURL: () => `data:image/jpeg;base64,frame-${luma}`,
+    toDataURL: (_type?: string, quality?: number) =>
+      `data:image/jpeg;base64,frame-${luma}-q${quality}`,
   });
   const video = {
     videoWidth: 1280,
@@ -185,15 +186,45 @@ describe("ScreenReader", () => {
     expect(reader.lastFrame).toBeNull();
 
     await reader.tick();
-    expect(reader.lastFrame).toBe("data:image/jpeg;base64,frame-30");
+    expect(reader.lastFrame).toBe("data:image/jpeg;base64,frame-30-q0.6");
 
     /* A frame the model called empty must not replace the one being shown. */
     dom.setLuma(120);
     await reader.tick();
-    expect(reader.lastFrame).toBe("data:image/jpeg;base64,frame-30");
+    expect(reader.lastFrame).toBe("data:image/jpeg;base64,frame-30-q0.6");
 
     reader.stop();
     expect(reader.lastFrame).toBeNull();
+  });
+
+  it("only makes a transcript thumbnail when it is asked for", async () => {
+    installDom(30);
+    const withThumbs: Array<{ text: string; thumbnail?: string }> = [];
+    const withoutThumbs: Array<{ text: string; thumbnail?: string }> = [];
+
+    const wanted = new ScreenReader({
+      describe: async () => "Budget table.",
+      onSummary: (summary) => withThumbs.push(summary),
+      intervalMs: 1000,
+      thumbnails: true,
+    });
+    wanted.start(stream);
+    await wanted.tick();
+    wanted.stop();
+
+    const plain = new ScreenReader({
+      describe: async () => "Budget table.",
+      onSummary: (summary) => withoutThumbs.push(summary),
+      intervalMs: 1000,
+    });
+    plain.start(stream);
+    await plain.tick();
+    plain.stop();
+
+    /* Cheaper than the frame that was sent, and only when requested: this is the
+       one part of a capture that gets written to disk. */
+    expect(withThumbs[0].thumbnail).toBe("data:image/jpeg;base64,frame-30-q0.5");
+    expect(withoutThumbs[0].thumbnail).toBeUndefined();
   });
 
   it("stops asking when the provider fails, reporting once", async () => {

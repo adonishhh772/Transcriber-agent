@@ -22,7 +22,7 @@ export type MeetingRecord = {
   /** Set when meeting audio was saved under this id. */
   hasAudio?: boolean;
   /** What the shared screen showed, in order. */
-  screenNotes?: Array<{ atMs: number; text: string }>;
+  screenNotes?: Array<{ atMs: number; text: string; thumbnail?: string }>;
   /** Changelog of what the AI suggested and when it changed. */
   aiActivity?: AiActivityEntry[];
   /** Questions asked about this meeting, in order. */
@@ -45,7 +45,7 @@ export type MeetingAudioRecord = {
 const DB_NAME = "transcriber-meetings";
 const STORE = "meetings";
 const AUDIO_STORE = "audio";
-export const MEETING_SCHEMA_VERSION = 4;
+export const MEETING_SCHEMA_VERSION = 5;
 
 export function openMeetingDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

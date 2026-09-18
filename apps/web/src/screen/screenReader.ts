@@ -15,6 +15,12 @@ export const NO_CONTENT = "NO_CONTENT";
 export type ScreenSummary = {
   atMs: number;
   text: string;
+  /**
+   * A small copy of the frame, for the transcript row. Only produced when the
+   * caller asks for it (`thumbnails: true`), because it is the one part of a
+   * capture that is written to disk.
+   */
+  thumbnail?: string;
 };
 
 export type ScreenReaderOptions = {
@@ -27,11 +33,16 @@ export type ScreenReaderOptions = {
   onError?: (message: string) => void;
   /** Width the frame is scaled to before it is sent. */
   targetWidth?: number;
+  /** Also produce a small thumbnail for the transcript. Off by default. */
+  thumbnails?: boolean;
+  /** Width of that thumbnail. */
+  thumbnailWidth?: number;
   now?: () => number;
 };
 
 export const DEFAULT_SCREEN_INTERVAL_MS = 25_000;
 const TARGET_WIDTH = 640;
+const THUMBNAIL_WIDTH = 320;
 const SIGNATURE_WIDTH = 32;
 const SIGNATURE_HEIGHT = 18;
 /** Mean per-pixel difference (0-255) below which two frames count as equal. */
@@ -101,6 +112,7 @@ export class ScreenReader {
     this.options = {
       intervalMs: DEFAULT_SCREEN_INTERVAL_MS,
       targetWidth: TARGET_WIDTH,
+      thumbnailWidth: THUMBNAIL_WIDTH,
       ...options,
     };
   }
@@ -196,7 +208,11 @@ export class ScreenReader {
       /* Kept with the summary it belongs to, so the preview can never show a
          frame that produced a different description. */
       this.frame = sample.dataUrl;
-      this.options.onSummary({ atMs: this.now() - this.startedAt, text });
+      this.options.onSummary({
+        atMs: this.now() - this.startedAt,
+        text,
+        ...(sample.thumbnail ? { thumbnail: sample.thumbnail } : {}),
+      });
       this.options.onStatus?.("Screen captured");
     } catch (error) {
       this.options.onError?.(
@@ -208,7 +224,11 @@ export class ScreenReader {
   }
 
   /** Draws the current frame twice: a JPEG to send and a tiny signature. */
-  private sampleFrame(): { dataUrl: string; signature: number[] } | null {
+  private sampleFrame(): {
+    dataUrl: string;
+    thumbnail: string | null;
+    signature: number[];
+  } | null {
     const video = this.video;
     const canvas = this.canvas;
     if (!video || !canvas || video.videoWidth === 0) return null;
@@ -225,11 +245,14 @@ export class ScreenReader {
     try {
       context.drawImage(video, 0, 0, width, height);
       const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+      const thumbnail = this.options.thumbnails
+        ? this.thumbnailFrom(canvas)
+        : null;
       const small = document.createElement("canvas");
       small.width = SIGNATURE_WIDTH;
       small.height = SIGNATURE_HEIGHT;
       const smallContext = small.getContext("2d");
-      if (!smallContext) return { dataUrl, signature: [] };
+      if (!smallContext) return { dataUrl, thumbnail, signature: [] };
       smallContext.drawImage(video, 0, 0, SIGNATURE_WIDTH, SIGNATURE_HEIGHT);
       const pixels = smallContext.getImageData(
         0,
@@ -246,9 +269,32 @@ export class ScreenReader {
             1000,
         );
       }
-      return { dataUrl, signature };
+      return { dataUrl, thumbnail, signature };
     } catch {
       /* A frame can fail while the share is being set up. */
+      return null;
+    }
+  }
+
+  /**
+   * A small copy of the frame already drawn on the main canvas.
+   *
+   * Cheaper than re-drawing the video, and it is what the transcript keeps, so
+   * quality is deliberately modest: a slide title has to stay legible, nothing
+   * more.
+   */
+  private thumbnailFrom(source: HTMLCanvasElement): string | null {
+    try {
+      const target = this.options.thumbnailWidth ?? THUMBNAIL_WIDTH;
+      const scale = Math.min(1, target / source.width);
+      const thumb = document.createElement("canvas");
+      thumb.width = Math.max(1, Math.round(source.width * scale));
+      thumb.height = Math.max(1, Math.round(source.height * scale));
+      const context = thumb.getContext("2d");
+      if (!context) return null;
+      context.drawImage(source, 0, 0, thumb.width, thumb.height);
+      return thumb.toDataURL("image/jpeg", 0.5);
+    } catch {
       return null;
     }
   }

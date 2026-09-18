@@ -21,6 +21,11 @@ export type AsrSettings = {
   recordAudio: boolean;
   /** Read the shared screen with a vision model and feed the notes. */
   readScreen: boolean;
+  /**
+   * Keep a small picture of each capture with the meeting, so the transcript
+   * shows what was on screen. This is the only screen image that is stored.
+   */
+  keepScreenImages: boolean;
 };
 
 const DEFAULTS: AsrSettings = {
@@ -30,6 +35,7 @@ const DEFAULTS: AsrSettings = {
   localModel: "Xenova/whisper-tiny.en",
   recordAudio: true,
   readScreen: true,
+  keepScreenImages: true,
 };
 
 export const DEEPGRAM_MODELS = ["nova-3", "nova-2", "nova-2-general"];
@@ -53,6 +59,7 @@ export function loadAsrSettings(): AsrSettings {
       localModel: parsed.localModel?.trim() || DEFAULTS.localModel,
       recordAudio: parsed.recordAudio !== false,
       readScreen: parsed.readScreen !== false,
+      keepScreenImages: parsed.keepScreenImages !== false,
     };
   } catch {
     return { ...DEFAULTS };
