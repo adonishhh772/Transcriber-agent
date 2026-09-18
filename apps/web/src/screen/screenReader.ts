@@ -91,6 +91,8 @@ export class ScreenReader {
   private signature: number[] | null = null;
   private unchangedTicks = 0;
   private lastSummary = "";
+  /** The frame the summary on screen came from. Memory only, never stored. */
+  private frame: string | null = null;
   private busy = false;
   private running = false;
   private startedAt = 0;
@@ -105,6 +107,15 @@ export class ScreenReader {
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * The downscaled frame the model read for the newest summary, so the user can
+   * check what was actually sent. It is deliberately not persisted anywhere and
+   * is dropped as soon as the reader stops.
+   */
+  get lastFrame(): string | null {
+    return this.frame;
   }
 
   start(stream: MediaStream): boolean {
@@ -123,6 +134,7 @@ export class ScreenReader {
     this.signature = null;
     this.unchangedTicks = 0;
     this.lastSummary = "";
+    this.frame = null;
     this.running = true;
     this.startedAt = this.now();
     this.options.onStatus?.("Watching the shared screen");
@@ -138,6 +150,7 @@ export class ScreenReader {
     this.video = null;
     this.canvas = null;
     this.signature = null;
+    this.frame = null;
     if (video) {
       video.pause();
       video.srcObject = null;
@@ -180,6 +193,9 @@ export class ScreenReader {
       const text = reply.trim();
       if (!isNewSummary(this.lastSummary, text)) return;
       this.lastSummary = text;
+      /* Kept with the summary it belongs to, so the preview can never show a
+         frame that produced a different description. */
+      this.frame = sample.dataUrl;
       this.options.onSummary({ atMs: this.now() - this.startedAt, text });
       this.options.onStatus?.("Screen captured");
     } catch (error) {

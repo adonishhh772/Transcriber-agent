@@ -1553,18 +1553,46 @@
           </span>
           <span class="live-sep" aria-hidden="true"></span>
           <!-- Newest shared-screen description: the bar is outside every view, so
-               a capture is visible wherever you are. -->
-          <span
-            class="live-screen hidden"
-            id="float-screen"
-            role="status"
-            aria-live="polite"
-          >
+               a capture is visible wherever you are. Clicking it shows the frame
+               the model actually read; that frame is memory-only. -->
+          <button class="live-screen hidden" id="float-screen" type="button">
             <svg class="icon" aria-hidden="true">
               <use href="#i-doc"></use>
             </svg>
-            <span class="live-screen-text" id="float-screen-text"></span>
-          </span>
+            <span
+              class="live-screen-text"
+              id="float-screen-text"
+              aria-live="polite"
+            ></span>
+          </button>
+          <div
+            class="frame-preview hidden"
+            id="frame-preview"
+            role="dialog"
+            aria-label="Frame read from the shared screen"
+          >
+            <div class="frame-preview-head">
+              <span class="frame-preview-time" id="frame-preview-time"></span>
+              <button
+                id="frame-preview-close"
+                class="btn-icon"
+                type="button"
+                aria-label="Hide the frame"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-x"></use>
+                </svg>
+              </button>
+            </div>
+            <img
+              id="frame-preview-image"
+              alt="The frame the vision model read"
+            />
+            <p class="frame-preview-text" id="frame-preview-text"></p>
+            <p class="frame-preview-note">
+              Held in memory for this meeting only — never saved.
+            </p>
+          </div>
           <span class="live-sep hidden" id="float-screen-sep" aria-hidden="true"></span>
           <button id="return-button" class="btn btn-quiet hidden" type="button">
             Open meeting

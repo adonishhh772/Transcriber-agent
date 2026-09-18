@@ -49,7 +49,10 @@ the display track that also carries the meeting audio.
 - Nothing else on the machine is captured, there is no periodic desktop
   screenshot, and the frame is never stored — downscaled to 640px, sent at most
   every ~25 seconds and only when the picture changed, and reduced to a text
-  description that is kept with the meeting.
+  description that is kept with the meeting. The one exception is deliberate and
+  user-driven: clicking the capture chip in the live bar renders the newest frame
+  back from memory, so you can see exactly what was sent. It is not persisted,
+  and it is gone when the meeting ends.
 - After the picker closes, the app says which surface it got: *"Screen reading is
   limited to the shared window"*, or, if the whole monitor was shared, a warning
   that everything on it — other windows included — is visible to the model.
@@ -89,6 +92,13 @@ inside the right-hand panel: the bar is outside the views and fixed to the
 viewport, so the newest description — with its `mm:ss` and the full text in the
 tooltip — stays visible with the panel closed, while AI activity is showing, or
 scrolled to the bottom of a long transcript. It clears when the meeting ends.
+
+Clicking the chip opens the frame the model actually read. That frame is the one
+that was sent (same 640px-wide JPEG), held **in memory only** for the meeting:
+it is never written to IndexedDB or localStorage, the preview drops the decoded
+image when it closes, and the reader discards it the moment it stops. A new
+capture replaces it; nothing survives the meeting. (Escape closes the preview
+without ending the meeting, which is what Escape otherwise does while capturing.)
 
 ## Requirements
 

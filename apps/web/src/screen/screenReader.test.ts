@@ -172,6 +172,30 @@ describe("ScreenReader", () => {
     reader.stop();
   });
 
+  it("keeps the frame behind the summary, and drops it when it stops", async () => {
+    const dom = installDom(30);
+    const replies = ["Budget table.", NO_CONTENT];
+    const describe = vi.fn(async () => replies.shift() ?? NO_CONTENT);
+    const reader = new ScreenReader({
+      describe,
+      onSummary: () => {},
+      intervalMs: 1000,
+    });
+    reader.start(stream);
+    expect(reader.lastFrame).toBeNull();
+
+    await reader.tick();
+    expect(reader.lastFrame).toBe("data:image/jpeg;base64,frame-30");
+
+    /* A frame the model called empty must not replace the one being shown. */
+    dom.setLuma(120);
+    await reader.tick();
+    expect(reader.lastFrame).toBe("data:image/jpeg;base64,frame-30");
+
+    reader.stop();
+    expect(reader.lastFrame).toBeNull();
+  });
+
   it("stops asking when the provider fails, reporting once", async () => {
     installDom(30);
     const errors: string[] = [];

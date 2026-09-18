@@ -2436,11 +2436,24 @@ body:not([data-meeting-state="live"]) .panel-levels {
   gap: 7px;
   max-width: 320px;
   padding: 3px 9px 3px 7px;
+  border: 0;
   border-radius: var(--r-pill);
   background: var(--accent-wash);
   color: var(--text-secondary);
+  font: inherit;
   font-size: 0.72rem;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.live-screen:hover {
+  background: var(--accent-soft);
+}
+
+.live-screen:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .live-screen .icon {
@@ -2468,6 +2481,56 @@ body:not([data-meeting-state="live"]) .panel-levels {
   100% {
     background: var(--accent-wash);
   }
+}
+
+/* The frame behind the newest capture, on demand: it exists in memory only, so
+   this panel is the one place a screenshot is ever visible. */
+.frame-preview {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  display: grid;
+  gap: 8px;
+  width: min(380px, 74vw);
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  animation: page-in var(--t-base);
+}
+
+.frame-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.frame-preview-time {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-preview img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-secondary);
+}
+
+.frame-preview-text {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.frame-preview-note {
+  color: var(--text-muted);
+  font-size: 0.66rem;
 }
 
 /* Compact microphone / system-audio state inside the floating bar */

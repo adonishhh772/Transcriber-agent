@@ -195,9 +195,14 @@ const durationLabel = $("duration-label");
 const floatDuration = $("float-duration");
 const floatMic = $("float-mic");
 const floatSystem = $("float-system");
-const floatScreen = $("float-screen");
+const floatScreen = $("float-screen") as HTMLButtonElement;
 const floatScreenText = $("float-screen-text");
 const floatScreenSep = $("float-screen-sep");
+const framePreview = $("frame-preview");
+const framePreviewImage = $("frame-preview-image") as HTMLImageElement;
+const framePreviewTime = $("frame-preview-time");
+const framePreviewText = $("frame-preview-text");
+const framePreviewClose = $("frame-preview-close") as HTMLButtonElement;
 const panel = $("panel");
 const panelToggle = $("panel-toggle") as HTMLButtonElement;
 const panelClose = $("panel-close") as HTMLButtonElement;
@@ -1084,6 +1089,12 @@ window.addEventListener("keydown", (event) => {
   const dialogOpen = !endDialog.classList.contains("hidden");
   if (event.key === "Escape" && dialogOpen) {
     closeEndDialog();
+    return;
+  }
+  /* Escape closes the frame preview before anything else: without this it would
+     also end the meeting, because that is what Escape does while capturing. */
+  if (event.key === "Escape" && !framePreview.classList.contains("hidden")) {
+    closeFramePreview();
     return;
   }
   if (event.key === "Escape" && capture) void handleStop();
@@ -2317,6 +2328,9 @@ function appendScreenNote(note: { atMs: number; text: string }): void {
    The newest capture, in the floating bar
    ============================================================ */
 
+/** The description the bar is showing, so the preview can label its frame. */
+let latestCapture: { atMs: number; text: string } | null = null;
+
 /**
  * Shows the newest screen description in the live bar.
  *
@@ -2326,23 +2340,60 @@ function appendScreenNote(note: { atMs: number; text: string }): void {
  * bar truncates it.
  */
 function showScreenCapture(note: { atMs: number; text: string }): void {
+  latestCapture = note;
   if (!floatScreen || !floatScreenText) return;
   floatScreenText.textContent = note.text;
-  floatScreen.title = `${formatDuration(Math.floor(note.atMs / 1000))} — ${note.text}`;
+  floatScreen.title = `Show the frame the model read — ${formatDuration(Math.floor(note.atMs / 1000))}`;
   floatScreen.classList.remove("hidden");
   floatScreenSep?.classList.remove("hidden");
   floatScreen.classList.remove("is-new");
   void floatScreen.offsetWidth;
   floatScreen.classList.add("is-new");
+  /* An open preview follows the newest capture rather than going stale. */
+  if (!framePreview.classList.contains("hidden")) paintFramePreview();
 }
 
 function clearScreenCapture(): void {
+  latestCapture = null;
+  closeFramePreview();
   if (!floatScreen || !floatScreenText) return;
   floatScreenText.textContent = "";
   floatScreen.title = "";
   floatScreen.classList.add("hidden");
   floatScreen.classList.remove("is-new");
   floatScreenSep?.classList.add("hidden");
+}
+
+/** Puts the current frame and its description into the open preview. */
+function paintFramePreview(): void {
+  const frame = screenReader?.lastFrame ?? null;
+  const note = latestCapture;
+  if (!frame || !note) {
+    closeFramePreview();
+    return;
+  }
+  framePreviewImage.src = frame;
+  framePreviewTime.textContent = formatDuration(Math.floor(note.atMs / 1000));
+  framePreviewText.textContent = note.text;
+}
+
+function openFramePreview(): void {
+  const frame = screenReader?.lastFrame ?? null;
+  if (!frame || !latestCapture) {
+    showToast("That frame is no longer in memory");
+    return;
+  }
+  framePreview.classList.remove("hidden");
+  paintFramePreview();
+}
+
+/** Drops the decoded image as well as hiding it: memory only means memory only. */
+function closeFramePreview(): void {
+  if (!framePreview) return;
+  framePreview.classList.add("hidden");
+  framePreviewImage.removeAttribute("src");
+  framePreviewTime.textContent = "";
+  framePreviewText.textContent = "";
 }
 
 /* ============================================================
@@ -2509,6 +2560,21 @@ async function askAboutMeeting(): Promise<void> {
 askForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void askAboutMeeting();
+});
+
+floatScreen.addEventListener("click", () => {
+  if (framePreview.classList.contains("hidden")) openFramePreview();
+  else closeFramePreview();
+});
+
+framePreviewClose.addEventListener("click", () => closeFramePreview());
+
+/* A click anywhere outside the bar closes the preview. */
+document.addEventListener("pointerdown", (event) => {
+  if (framePreview.classList.contains("hidden")) return;
+  const target = event.target as Node | null;
+  if (target && !floatScreen.contains(target) && !framePreview.contains(target))
+    closeFramePreview();
 });
 
 /* ============================================================
