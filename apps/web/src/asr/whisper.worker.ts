@@ -1,4 +1,9 @@
 import type { WhisperWorkerRequest, WhisperWorkerResponse } from "./protocol";
+import {
+  buildWhisperChunkOptions,
+  modelAcceptsLanguageOption,
+  type WhisperModelLike,
+} from "./whisperModel";
 
 let disposed = false;
 let loadedModel = "";
@@ -77,6 +82,16 @@ async function transcribeChunk(
   language: string,
 ) {
   if (!pipeline || disposed) return null;
+  // English-only checkpoints (`*.en`) reject `language`/`task`, so only send
+  // them when the loaded model actually supports them.
+  const options = buildWhisperChunkOptions({
+    audioSeconds: (endMs - startMs) / 1000,
+    language,
+    acceptsLanguage: modelAcceptsLanguageOption(
+      (pipeline as { model?: WhisperModelLike }).model,
+      loadedModel,
+    ),
+  });
   const result = await (
     pipeline as (
       audio: Float32Array,
@@ -85,12 +100,7 @@ async function transcribeChunk(
       text?: string;
       chunks?: Array<{ text?: string; timestamp?: [number, number] }>;
     }>
-  )(audio, {
-    language,
-    task: "transcribe",
-    return_timestamps: true,
-    chunk_length_s: Math.max(1, (endMs - startMs) / 1000),
-  });
+  )(audio, options);
   const text = (result.text ?? "").trim();
   if (!text) return null;
   const first = result.chunks?.[0]?.timestamp?.[0] ?? 0;
