@@ -109,6 +109,21 @@ export function getDisplaySurface(stream: MediaStream): string | null {
   return settings?.displaySurface ?? null;
 }
 
+/**
+ * True on phones and tablets, where display capture does not exist at all.
+ *
+ * `getDisplayMedia()` is unsupported on every mobile browser — Chrome for
+ * Android, Safari on iOS, Firefox for Android, Samsung Internet — so a meeting
+ * cannot be captured there whatever the app does. Saying that plainly beats a
+ * generic "capture is unavailable".
+ */
+export function isMobileBrowser(): boolean {
+  const agent = navigator.userAgent ?? "";
+  if (/Android|iPhone|iPad|iPod|Mobile|Silk/i.test(agent)) return true;
+  /* iPadOS 13+ reports a Macintosh user agent but still has touch points. */
+  return (navigator.maxTouchPoints ?? 0) > 1 && /Macintosh/.test(agent);
+}
+
 export function captureSupport(): { supported: boolean; reason?: string } {
   if (
     !window.isSecureContext &&
@@ -123,11 +138,18 @@ export function captureSupport(): { supported: boolean; reason?: string } {
   if (
     !navigator.mediaDevices?.getDisplayMedia ||
     !navigator.mediaDevices?.getUserMedia
-  )
+  ) {
+    if (isMobileBrowser())
+      return {
+        supported: false,
+        reason:
+          "Meetings are captured on a desktop: phones and tablets have no screen- or system-audio capture in any browser. Open this address in Chrome or Edge on a computer to record, or read and edit meetings here.",
+      };
     return {
       supported: false,
       reason: "Display and microphone capture are unavailable in this browser.",
     };
+  }
   if (typeof AudioContext === "undefined")
     return {
       supported: false,
