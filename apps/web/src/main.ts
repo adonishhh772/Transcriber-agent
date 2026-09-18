@@ -548,7 +548,12 @@ for (const tab of panelTabs) {
     setPanelTab(tab.dataset.panel === "activity" ? "activity" : "transcript");
   });
 }
-panelToggle.addEventListener("click", () => panel.classList.toggle("is-open"));
+panelToggle.addEventListener("click", () => {
+  panel.classList.toggle("is-open");
+  /* A hidden list cannot be scrolled; pin it when it becomes visible again. */
+  if (panel.classList.contains("is-open") && autoscrollEnabled)
+    scrollTranscriptToEnd();
+});
 panelClose.addEventListener("click", () => panel.classList.remove("is-open"));
 
 transcriptSearch.addEventListener("input", () => {
@@ -559,17 +564,29 @@ transcriptAutoscroll.addEventListener("click", () => {
   syncAutoscrollButton();
   if (autoscrollEnabled) scrollTranscriptToEnd();
 });
-transcriptList.addEventListener("scroll", () => {
-  if (performance.now() < ignoreScrollUntil) return;
+/* Auto-scroll follows new lines until the reader scrolls back deliberately.
+   Only user gestures count: a programmatic scroll, a re-layout or the panel
+   opening must never switch it off, which is what used to happen. */
+function pauseAutoscrollOnUserScroll(): void {
+  if (!autoscrollEnabled) return;
   const atEnd =
     transcriptList.scrollHeight -
       transcriptList.scrollTop -
       transcriptList.clientHeight <
     24;
-  if (!atEnd && autoscrollEnabled) {
-    autoscrollEnabled = false;
-    syncAutoscrollButton();
-  }
+  if (atEnd) return;
+  autoscrollEnabled = false;
+  syncAutoscrollButton();
+}
+transcriptList.addEventListener("wheel", pauseAutoscrollOnUserScroll, {
+  passive: true,
+});
+transcriptList.addEventListener("touchmove", pauseAutoscrollOnUserScroll, {
+  passive: true,
+});
+transcriptList.addEventListener("keydown", (event) => {
+  if (["ArrowUp", "PageUp", "Home"].includes(event.key))
+    pauseAutoscrollOnUserScroll();
 });
 transcriptCopy.addEventListener("click", () => {
   copyText(
@@ -1929,15 +1946,7 @@ function syncAutoscrollButton(): void {
   transcriptAutoscroll.setAttribute("aria-pressed", String(autoscrollEnabled));
 }
 
-/**
- * Auto-scroll only yields to a deliberate scroll. Programmatic scrolling and
- * re-layout also fire `scroll`, which used to switch it off by itself within
- * seconds of a meeting starting.
- */
-let ignoreScrollUntil = 0;
-
 function scrollTranscriptToEnd(): void {
-  ignoreScrollUntil = performance.now() + 400;
   transcriptList.scrollTop = transcriptList.scrollHeight;
 }
 
