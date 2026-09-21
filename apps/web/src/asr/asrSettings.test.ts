@@ -28,6 +28,11 @@ describe("asr settings", () => {
     expect(settings.deepgramModel).toBe("nova-3");
     expect(settings.language).toBe("en");
     expect(settings.localModel).toContain("whisper");
+    expect(settings.chunkSeconds).toBe(6);
+    expect(settings.overlapSeconds).toBe(2);
+    /* Local-only mode is on until the user turns it off, and that choice is
+       stored rather than re-armed on every reload. */
+    expect(settings.localOnly).toBe(true);
     expect(settings.recordAudio).toBe(true);
     expect(settings.readScreen).toBe(true);
     /* Screenshots in the transcript are on by default, and opt-out. */
@@ -40,12 +45,43 @@ describe("asr settings", () => {
       deepgramModel: "nova-2",
       language: "en-GB",
       localModel: "Xenova/whisper-base",
+      chunkSeconds: 8,
+      overlapSeconds: 1.5,
+      localOnly: false,
       recordAudio: false,
       readScreen: false,
       keepScreenImages: false,
     };
     saveAsrSettings(settings);
     expect(loadAsrSettings()).toEqual(settings);
+  });
+
+  it("keeps the capture choices a reload used to reset", () => {
+    localStorage.setItem(
+      "gather.asr.v1",
+      JSON.stringify({
+        localModel: "Xenova/whisper-small.en",
+        chunkSeconds: 12,
+        overlapSeconds: 3,
+        localOnly: false,
+        recordAudio: true,
+      }),
+    );
+    const settings = loadAsrSettings();
+    expect(settings.localModel).toBe("Xenova/whisper-small.en");
+    expect(settings.chunkSeconds).toBe(12);
+    expect(settings.overlapSeconds).toBe(3);
+    expect(settings.localOnly).toBe(false);
+  });
+
+  it("repairs a stored number that is out of range or nonsense", () => {
+    localStorage.setItem(
+      "gather.asr.v1",
+      JSON.stringify({ chunkSeconds: 900, overlapSeconds: "wide" }),
+    );
+    const settings = loadAsrSettings();
+    expect(settings.chunkSeconds).toBe(30);
+    expect(settings.overlapSeconds).toBe(2);
   });
 
   it("keeps screen images on for a stored older choice", () => {
@@ -70,6 +106,9 @@ describe("resolveAsrProvider", () => {
     deepgramModel: "nova-3",
     language: "en",
     localModel: "Xenova/whisper-tiny.en",
+    chunkSeconds: 6,
+    overlapSeconds: 2,
+    localOnly: false,
     recordAudio: true,
     readScreen: true,
     keepScreenImages: true,

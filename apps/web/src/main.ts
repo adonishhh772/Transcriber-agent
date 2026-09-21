@@ -21,6 +21,8 @@ import { DeepgramStreamingClient } from "./asr/deepgramClient";
 import {
   DEEPGRAM_LANGUAGES,
   DEEPGRAM_MODELS,
+  CHUNK_LIMITS,
+  OVERLAP_LIMITS,
   describeAsrProvider,
   loadAsrSettings,
   resolveAsrProvider,
@@ -254,6 +256,7 @@ const askButton = $("ask-button") as HTMLButtonElement;
 const askThreadElement = $("ask-thread");
 const askHint = $("ask-hint");
 const askDock = $("ask-dock");
+const askThreadToggle = $("ask-thread-toggle") as HTMLButtonElement;
 const noteFields = {
   summary: $("note-summary") as HTMLTextAreaElement,
   keyPoints: $("note-key-points") as HTMLTextAreaElement,
@@ -796,8 +799,13 @@ retryNotes.addEventListener("click", () => void finaliseNotes());
 
 testAudioButton.addEventListener("click", () => void testAudio());
 
-privacyMode.addEventListener("change", syncPrivacyState);
+privacyMode.addEventListener("change", () => {
+  saveCaptureSettings({ localOnly: privacyMode.checked });
+  syncPrivacyState();
+});
 modelInput.addEventListener("input", () => {
+  /* Remembered as it is typed, so a reload keeps the model that was chosen. */
+  saveCaptureSettings({ localModel: modelInput.value.trim() });
   /* The chosen model is loaded ahead of the meeting, so a typed-in id starts
      a fresh load once the user stops typing. */
   syncPrepareModel();
@@ -808,6 +816,28 @@ modelInput.addEventListener("input", () => {
     void ensureWhisperModel(true);
   }, 900);
 });
+/* The window and overlap are read when a meeting starts; storing them keeps a
+   tuned pair from resetting to 6/2 on every reload. */
+chunkInput.addEventListener("change", () =>
+  saveCaptureSettings({
+    chunkSeconds: clampNumber(
+      chunkInput.value,
+      CHUNK_LIMITS.min,
+      CHUNK_LIMITS.max,
+      6,
+    ),
+  }),
+);
+overlapInput.addEventListener("change", () =>
+  saveCaptureSettings({
+    overlapSeconds: clampNumber(
+      overlapInput.value,
+      OVERLAP_LIMITS.min,
+      OVERLAP_LIMITS.max,
+      2,
+    ),
+  }),
+);
 modelReload.addEventListener("click", () => {
   hideError();
   void reloadWhisperModel();
@@ -852,6 +882,27 @@ function saveAsrAndSync(): void {
   syncAsrSettingsUi();
 }
 
+/** Saves a change to one of the capture choices without disturbing the rest. */
+function saveCaptureSettings(patch: Partial<AsrSettings>): void {
+  saveAsrSettings({ ...currentAsrSettings(), ...patch });
+}
+
+/**
+ * Seeds the capture controls from what was stored.
+ *
+ * Local-only mode, the Whisper model and the window/overlap used to live only
+ * in the markup, so every reload silently put them back to their defaults and
+ * the choice had to be made again. They are read once, before anything renders
+ * from them.
+ */
+function applyStoredCaptureSettings(): void {
+  const settings = currentAsrSettings();
+  privacyMode.checked = settings.localOnly;
+  modelInput.value = settings.localModel;
+  chunkInput.value = String(settings.chunkSeconds);
+  overlapInput.value = String(settings.overlapSeconds);
+}
+
 /**
  * Choosing a cloud engine is an explicit decision to send audio off the
  * device, so it turns local-only mode off (the reverse is never automatic).
@@ -860,6 +911,9 @@ function allowCloudAudioWhenChosen(): void {
   if (currentAsrSettings().provider !== "deepgram") return;
   if (!deepgramKeyValue().trim() || !privacyMode.checked) return;
   privacyMode.checked = false;
+  /* Stored, so the next reload does not arm local-only mode again and block the
+     cloud engine the user just chose. */
+  saveCaptureSettings({ localOnly: false });
   syncPrivacyState();
   /* Re-render: the summary and the Start button both depend on this. */
   syncAsrSettingsUi();
@@ -1114,6 +1168,9 @@ for (const field of growableFields) {
 
 void loadHistory();
 migratePlaintextKeys();
+/* The stored choices are applied first: the privacy switch, the model and the
+   window are all read by what renders below. */
+applyStoredCaptureSettings();
 syncPrivacyState();
 syncPrepareModel();
 syncAiSettingsUi();
@@ -3148,12 +3205,61 @@ function scrollAskThreadToEnd(): void {
   askThreadElement.scrollTop = askThreadElement.scrollHeight;
 }
 
+/** Where the answer thread's open/closed state is remembered. */
+const ASK_THREAD_KEY = "gather.ask.thread";
+
+/** The thread is open unless the user closed it; asking opens it again. */
+let askThreadOpen = (() => {
+  try {
+    return localStorage.getItem(ASK_THREAD_KEY) !== "0";
+  } catch {
+    return true;
+  }
+})();
+
+function saveAskThreadOpen(open: boolean): void {
+  try {
+    localStorage.setItem(ASK_THREAD_KEY, open ? "1" : "0");
+  } catch {
+    /* the choice simply does not persist */
+  }
+}
+
+/**
+ * Shows or hides the answer thread.
+ *
+ * The panel is tall and floats over the document, so it has to be closable —
+ * and, because it is the only place an answer appears, the control that hides it
+ * is the same one that brings it back, with the count of what is in it.
+ */
+function syncAskThreadVisibility(): void {
+  const turns = askThread.length;
+  const open = turns > 0 && askThreadOpen;
+  askThreadElement.classList.toggle("hidden", !open);
+  askThreadToggle.classList.toggle("hidden", turns === 0);
+  askThreadToggle.classList.toggle("is-open", open);
+  askThreadToggle.setAttribute("aria-expanded", String(open));
+  const label = open
+    ? `Hide the ${turns} question${turns === 1 ? "" : "s"} and answers`
+    : `Show the ${turns} question${turns === 1 ? "" : "s"} and answers`;
+  askThreadToggle.setAttribute("aria-label", label);
+  askThreadToggle.title = label;
+}
+
+askThreadToggle.addEventListener("click", () => {
+  askThreadOpen = !askThreadOpen;
+  saveAskThreadOpen(askThreadOpen);
+  syncAskThreadVisibility();
+  if (askThreadOpen) scrollAskThreadToEnd();
+});
+
 function renderAskThread(): void {
   askThreadElement.textContent = "";
   for (const turn of askThread) {
     const { row } = askTurnRow(turn);
     askThreadElement.append(row);
   }
+  syncAskThreadVisibility();
   scrollAskThreadToEnd();
 }
 
@@ -3180,6 +3286,10 @@ async function askAboutMeeting(): Promise<void> {
   answer.classList.add("is-pending");
   answer.textContent = "Reading the transcript…";
   askThreadElement.append(row);
+  /* Asking opens the thread: the answer is the point of the question. */
+  askThreadOpen = true;
+  saveAskThreadOpen(true);
+  syncAskThreadVisibility();
   scrollAskThreadToEnd();
   askingInFlight = true;
   syncAskState();

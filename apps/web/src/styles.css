@@ -1916,7 +1916,22 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   border-radius: var(--r-lg);
   background: rgba(255, 254, 251, 0.97);
   box-shadow: var(--shadow-float);
-  animation: controls-in var(--t-base);
+  /* Its own entrance: the live bar's `controls-in` ends on a horizontal
+     -50%, which is right for that bar (it is the translated element) and wrong
+     here (this form sits inside the translated dock), so the bar used to appear
+     half a width to the left and jump into place. */
+  animation: dock-in var(--t-base);
+}
+
+@keyframes dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .ask-dock-label {
@@ -1945,12 +1960,27 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   outline: none;
 }
 
-/* The hint sits just above the bar, where the state of the box is read. */
+/* Opens and closes the answer thread. Closed, it points up at the panel it
+   will bring back; open, it points down at where the panel returns to. */
+.ask-thread-toggle .icon {
+  transition: transform var(--t-fast);
+}
+
+.ask-thread-toggle:not(.is-open) .icon {
+  transform: rotate(180deg);
+}
+
+/* The hint sits just above the bar, where the state of the box is read. It is a
+   chip because the document scrolls behind it. */
 .ask-dock-hint {
+  align-self: flex-start;
   margin: 0;
-  padding-left: 4px;
-  font-size: 0.68rem;
-  text-shadow: 0 1px 3px rgba(247, 245, 240, 0.9);
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: rgba(255, 254, 251, 0.95);
+  box-shadow: 0 2px 10px rgba(55, 47, 36, 0.07);
+  font-size: 0.66rem;
 }
 
 /* The thread floats above the bar and is the one thing here that may scroll:

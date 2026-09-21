@@ -185,12 +185,19 @@ screen captures, so the library and settings have nothing to ask about, and
   appears, the audio size shows up), so its height is **measured** with a
   `ResizeObserver` and fed to the ask bar as a CSS offset — a guessed number
   would overlap it on a narrow window.
-- The thread of questions and answers floats above the bar, and is the one place
-  a scroll is unavoidable: a chat panel cannot grow past the window. It shows
-  the newest answer as it arrives.
+- The thread of questions and answers floats above the bar, follows the newest
+  answer, and is the one place a scroll is unavoidable: a chat panel cannot grow
+  past the window.
+- The thread **opens and closes** from the chevron at the right of the bar, which
+  is the same control in both states (pointing up at the panel it will bring back,
+  down at where it will go), counts what is in it in its label (`Hide the 2
+  questions and answers`), and appears only once there is something to show.
+  Asking always opens it — the answer is the point of the question — and the
+  open/closed choice is remembered in `gather.ask.thread` across reloads.
 - The hint beside the bar says why the box is not usable yet (`Add an AI key in
   Settings`, `Unlocks once notes are written`, `Off in local-only mode`,
-  `Answering…`), and the notes sections above stay exactly where they were.
+  `Answering…`), and the notes sections above stay exactly where they were. It is
+  a chip, because the document scrolls behind it.
 
 ## Requirements
 
@@ -233,6 +240,31 @@ Four views share one shell (navigation rail + main region):
 5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
 
 The settings page follows local-only mode. **Both tabs are cloud features** — a speech engine that streams audio away and a notes provider that receives text — so turning local-only mode on hides the tab row, both panels and the key vault, leaving Privacy and Local Whisper. That is also why the capture switches live where they do: *Summarise shared screens* and *Keep the frame with each capture* are vision-provider settings and sit with AI notes, while *Save the meeting audio* stays on this device and sits in the Privacy block, reachable either way.
+
+### What is remembered
+
+Every choice made here is stored in this browser and comes back on the next
+reload:
+
+| Choice | Stored in |
+| --- | --- |
+| Local-only mode | `gather.asr.v1` (`localOnly`) |
+| Speech engine, Deepgram model and language | `gather.asr.v1` |
+| Local Whisper model, window (chunk) and overlap | `gather.asr.v1` |
+| Save the meeting audio / summarise screens / keep the frame | `gather.asr.v1` |
+| Compute (GPU or CPU only) | `gather.backend` |
+| AI provider, model, base URL and vision model | `gather.ai.v1` |
+| Keys | session storage, or the encrypted vault |
+| Whether the answer thread is open | `gather.ask.thread` |
+| Collapsed navigation rail | `gather.rail.collapsed` |
+
+Local-only mode and the Whisper window used to live only in the markup, so a
+reload silently turned local-only mode back on and reset the window to 6/2 —
+anyone whose key was locked in the vault had to turn it off again before every
+meeting. The stored mode is a record of the user's own decision, and
+`allowCloudAudioWhenChosen()` writes it too: choosing Deepgram with a key is
+already an explicit decision to send audio off the device, so the next reload no
+longer re-arms the switch that would block it.
 
 ## What to pick in the share dialog
 
@@ -418,7 +450,8 @@ npm run format
 18. With a window shared, minimise that window (or press the browser's *Stop sharing*): the meeting must **keep recording** — the microphone level still moves, the transcript still grows, a warning names the lost surface, and **Share again** brings system audio back with no gap in the transcript. Confirm the meeting only ends from **End meeting** (or Escape, which asks first).
 19. Click a note section title while notes are present and confirm the panel shows the timestamped transcript lines and screen captures that pass was given, that **Copy content** copies them, and that they are still there after a reload.
 20. On the **AI activity** tab, confirm the log scrolls inside its own region rather than pushing the counters off the page, that it no longer repeats the notes as a "Latest notes" block, and that **What it read** on a `Notes updated` row opens the content behind that line (and closes again).
-21. Confirm the **ask bar** floats at the foot of the meeting page on both a live and a completed meeting, that it sits just above the recording bar while one runs (including when a screen capture appears in that bar and it grows), and that it is absent on the library, prepare and settings pages. Confirm the answer thread floats above it and follows the newest answer.
+21. Confirm the **ask bar** floats at the foot of the meeting page on both a live and a completed meeting, that it sits just above the recording bar while one runs (including when a screen capture appears in that bar and it grows), and that it is absent on the library, prepare and settings pages. Confirm the bar is centred from its first frame, that the answer thread opens and closes from the chevron (and that the choice survives a reload), and that asking opens the thread again.
+22. Change local-only mode, the Whisper model, the chunk and the overlap, reload the page, and confirm all four come back as they were set.
 
 ## Production review status
 

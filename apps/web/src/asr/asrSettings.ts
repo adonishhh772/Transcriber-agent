@@ -17,6 +17,18 @@ export type AsrSettings = {
   language: string;
   /** Local Whisper model id. */
   localModel: string;
+  /** Window the local engine reads, in seconds. */
+  chunkSeconds: number;
+  /** How much of each window is re-read, so words at a boundary survive. */
+  overlapSeconds: number;
+  /**
+   * Local-only mode: no audio, screen or text leaves this device.
+   *
+   * Stored like the other choices. It used to reset to "on" on every reload, so
+   * anyone whose key is locked in the vault had to turn it off again before
+   * every single meeting — which is a chore, not a privacy decision.
+   */
+  localOnly: boolean;
   /** Keep the mixed meeting audio so it can be replayed or downloaded. */
   recordAudio: boolean;
   /** Read the shared screen with a vision model and feed the notes. */
@@ -28,15 +40,29 @@ export type AsrSettings = {
   keepScreenImages: boolean;
 };
 
+export const CHUNK_LIMITS = { min: 2, max: 30 };
+export const OVERLAP_LIMITS = { min: 0, max: 10 };
+
 const DEFAULTS: AsrSettings = {
   provider: "deepgram",
   deepgramModel: "nova-3",
   language: "en",
   localModel: "Xenova/whisper-tiny.en",
+  chunkSeconds: 6,
+  overlapSeconds: 2,
+  localOnly: true,
   recordAudio: true,
   readScreen: true,
   keepScreenImages: true,
 };
+
+/** Keeps a stored number usable even if the field was edited into nonsense. */
+function clamp(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed)
+    ? Math.min(max, Math.max(min, parsed))
+    : fallback;
+}
 
 export const DEEPGRAM_MODELS = ["nova-3", "nova-2", "nova-2-general"];
 
@@ -57,6 +83,19 @@ export function loadAsrSettings(): AsrSettings {
       deepgramModel: parsed.deepgramModel?.trim() || DEFAULTS.deepgramModel,
       language: parsed.language?.trim() || DEFAULTS.language,
       localModel: parsed.localModel?.trim() || DEFAULTS.localModel,
+      chunkSeconds: clamp(
+        parsed.chunkSeconds,
+        CHUNK_LIMITS.min,
+        CHUNK_LIMITS.max,
+        DEFAULTS.chunkSeconds,
+      ),
+      overlapSeconds: clamp(
+        parsed.overlapSeconds,
+        OVERLAP_LIMITS.min,
+        OVERLAP_LIMITS.max,
+        DEFAULTS.overlapSeconds,
+      ),
+      localOnly: parsed.localOnly !== false,
       recordAudio: parsed.recordAudio !== false,
       readScreen: parsed.readScreen !== false,
       keepScreenImages: parsed.keepScreenImages !== false,
