@@ -1788,19 +1788,9 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   transform: rotate(180deg);
 }
 
-/*
- * The notes scroll as one region, exactly like the transcript: a long meeting
- * with long sections used to stretch the document page without limit.
- */
-.notes-scroll {
-  max-height: min(62vh, 660px);
-  margin-top: 4px;
-  padding-right: 10px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-/* What one notes pass was given: the content behind the section above it. */
+/* What one notes pass was given: the content behind the section above it.
+   It is not given a scroll of its own — the document flows, and the only
+   scrolling regions in the workspace are the transcript and the AI log. */
 .note-source {
   margin-top: 11px;
   padding: 12px 14px;
@@ -1833,9 +1823,6 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
 .note-source-body {
   display: grid;
   gap: 7px;
-  max-height: 230px;
-  padding-right: 4px;
-  overflow-y: auto;
 }
 
 .note-source-line {
@@ -2424,7 +2411,7 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   transform: rotate(180deg);
 }
 
-/* The panel keeps its own scroll, so a long pass never buries the log. */
+/* The panel is part of the log's own scroll; the log stays the scroll region. */
 .ai-activity-source {
   margin-top: 9px;
 }

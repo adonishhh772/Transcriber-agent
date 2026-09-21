@@ -139,15 +139,17 @@ conversation away.
 
 ## Reading notes as a page, and as a claim
 
-The Gather-notes block scrolls as one region, like the transcript, so a long
-meeting cannot stretch the document page without limit.
+The workspace document flows: the notes are the page, not a pane inside it. The
+only two scroll regions in the workspace are the transcript panel and the **AI
+activity** log, each with its own small scroll.
 
 Every note section title is also the control that opens **what that section was
 written from**: the transcript lines and screen captures that were sent for the
 pass that wrote it, timestamped, with the pass (rolling or end-of-meeting), the
 provider · model that answered and the speech engine that produced the lines. The
-content can be copied on its own. A section that a later pass did not touch keeps
-the source of the pass that did.
+content can be copied on its own, and opening it lengthens the document like any
+other disclosure. A section that a later pass did not touch keeps the source of
+the pass that did.
 
 The **AI activity** tab answers the same question for every line in the log: a
 `Notes updated` or `Final notes` row carries a **What it read** control that opens
@@ -205,7 +207,7 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state. A meeting is stored as soon as it has produced anything — words, screen captures, typed notes or kept audio — or has simply run for five seconds, so a silent meeting or one where only slides were shared is still listed rather than vanishing; those rows say what they do have (`No speech transcribed · 2 screen captures`) and the flag reads *Nothing captured* instead of claiming a transcript. A search that matches nothing says how many meetings it is hiding and offers **Clear search**, because "no meetings" and "filtered out" must not look the same.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs) that scrolls as one region, with each section title opening the content that section was written from; a transcript / AI-activity panel with search, auto-scroll and copy; and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, **Share again** when the shared surface is lost, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), which flows as a page and whose section titles open the content each section was written from; a transcript / AI-activity panel with search, auto-scroll and copy, where the transcript and the AI log each scroll in their own region; and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, **Share again** when the shared surface is lost, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
 5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
 

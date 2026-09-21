@@ -1279,168 +1279,165 @@
                   <span class="skeleton-line w-60"></span>
                 </div>
 
-                <!-- The notes scroll as one region, like the transcript: a
-                     long meeting must never turn the document into an endless
-                     page. Each section title opens what that section was
-                     written from. -->
-                <div class="notes-scroll" id="notes-scroll">
-                  <section class="note-section" data-note="summary">
-                    <h3>
-                      <button
-                        class="note-title"
-                        type="button"
-                        data-note-source="summary"
-                        aria-expanded="false"
-                        title="Show what this summary was written from"
-                      >
-                        <span>Summary</span>
-                        <svg class="icon note-source-mark" aria-hidden="true">
-                          <use href="#i-chevron"></use>
-                        </svg>
-                      </button>
-                    </h3>
-                    <textarea
-                      id="note-summary"
-                      rows="2"
-                      placeholder="A concise summary appears here as the conversation unfolds."
-                    ></textarea>
-                    <div
-                      class="note-source-panel hidden"
-                      data-note-source-panel="summary"
-                    ></div>
-                  </section>
-                  <section class="note-section" data-note="keyPoints">
-                    <h3>
-                      <button
-                        class="note-title"
-                        type="button"
-                        data-note-source="keyPoints"
-                        aria-expanded="false"
-                        title="Show what these key points were written from"
-                      >
-                        <span>Key points</span>
-                        <svg class="icon note-source-mark" aria-hidden="true">
-                          <use href="#i-chevron"></use>
-                        </svg>
-                      </button>
-                    </h3>
-                    <textarea
-                      id="note-key-points"
-                      rows="3"
-                      placeholder="The moments that changed the direction of the work."
-                    ></textarea>
-                    <div
-                      class="note-source-panel hidden"
-                      data-note-source-panel="keyPoints"
-                    ></div>
-                  </section>
-                  <section class="note-section" data-note="decisions">
-                    <h3>
-                      <button
-                        class="note-title"
-                        type="button"
-                        data-note-source="decisions"
-                        aria-expanded="false"
-                        title="Show what these decisions were written from"
-                      >
-                        <span>Decisions</span>
-                        <svg class="icon note-source-mark" aria-hidden="true">
-                          <use href="#i-chevron"></use>
-                        </svg>
-                      </button>
-                    </h3>
-                    <textarea
-                      id="note-decisions"
-                      rows="2"
-                      placeholder="What the room agreed to."
-                    ></textarea>
-                    <div
-                      class="note-source-panel hidden"
-                      data-note-source-panel="decisions"
-                    ></div>
-                  </section>
-                  <section class="note-section" data-note="actionItems">
-                    <h3>
-                      <button
-                        class="note-title"
-                        type="button"
-                        data-note-source="actionItems"
-                        aria-expanded="false"
-                        title="Show what these action items were written from"
-                      >
-                        <span>Action items</span>
-                        <svg class="icon note-source-mark" aria-hidden="true">
-                          <use href="#i-chevron"></use>
-                        </svg>
-                      </button>
-                    </h3>
-                    <textarea
-                      id="note-action-items"
-                      rows="2"
-                      placeholder="Who is doing what next."
-                    ></textarea>
-                    <div
-                      class="note-source-panel hidden"
-                      data-note-source-panel="actionItems"
-                    ></div>
-                  </section>
-                  <section class="note-section" data-note="questions">
-                    <h3>
-                      <button
-                        class="note-title"
-                        type="button"
-                        data-note-source="questions"
-                        aria-expanded="false"
-                        title="Show what these open questions were written from"
-                      >
-                        <span>Open questions</span>
-                        <svg class="icon note-source-mark" aria-hidden="true">
-                          <use href="#i-chevron"></use>
-                        </svg>
-                      </button>
-                    </h3>
-                    <textarea
-                      id="note-questions"
-                      rows="2"
-                      placeholder="What remains unresolved."
-                    ></textarea>
-                    <div
-                      class="note-source-panel hidden"
-                      data-note-source-panel="questions"
-                    ></div>
-                  </section>
+                <!-- Each section title opens the content that section was
+                     written from. The document itself flows; the transcript
+                     panel and the AI activity log are the scroll regions. -->
+                <section class="note-section" data-note="summary">
+                  <h3>
+                    <button
+                      class="note-title"
+                      type="button"
+                      data-note-source="summary"
+                      aria-expanded="false"
+                      title="Show what this summary was written from"
+                    >
+                      <span>Summary</span>
+                      <svg class="icon note-source-mark" aria-hidden="true">
+                        <use href="#i-chevron"></use>
+                      </svg>
+                    </button>
+                  </h3>
+                  <textarea
+                    id="note-summary"
+                    rows="2"
+                    placeholder="A concise summary appears here as the conversation unfolds."
+                  ></textarea>
+                  <div
+                    class="note-source-panel hidden"
+                    data-note-source-panel="summary"
+                  ></div>
+                </section>
+                <section class="note-section" data-note="keyPoints">
+                  <h3>
+                    <button
+                      class="note-title"
+                      type="button"
+                      data-note-source="keyPoints"
+                      aria-expanded="false"
+                      title="Show what these key points were written from"
+                    >
+                      <span>Key points</span>
+                      <svg class="icon note-source-mark" aria-hidden="true">
+                        <use href="#i-chevron"></use>
+                      </svg>
+                    </button>
+                  </h3>
+                  <textarea
+                    id="note-key-points"
+                    rows="3"
+                    placeholder="The moments that changed the direction of the work."
+                  ></textarea>
+                  <div
+                    class="note-source-panel hidden"
+                    data-note-source-panel="keyPoints"
+                  ></div>
+                </section>
+                <section class="note-section" data-note="decisions">
+                  <h3>
+                    <button
+                      class="note-title"
+                      type="button"
+                      data-note-source="decisions"
+                      aria-expanded="false"
+                      title="Show what these decisions were written from"
+                    >
+                      <span>Decisions</span>
+                      <svg class="icon note-source-mark" aria-hidden="true">
+                        <use href="#i-chevron"></use>
+                      </svg>
+                    </button>
+                  </h3>
+                  <textarea
+                    id="note-decisions"
+                    rows="2"
+                    placeholder="What the room agreed to."
+                  ></textarea>
+                  <div
+                    class="note-source-panel hidden"
+                    data-note-source-panel="decisions"
+                  ></div>
+                </section>
+                <section class="note-section" data-note="actionItems">
+                  <h3>
+                    <button
+                      class="note-title"
+                      type="button"
+                      data-note-source="actionItems"
+                      aria-expanded="false"
+                      title="Show what these action items were written from"
+                    >
+                      <span>Action items</span>
+                      <svg class="icon note-source-mark" aria-hidden="true">
+                        <use href="#i-chevron"></use>
+                      </svg>
+                    </button>
+                  </h3>
+                  <textarea
+                    id="note-action-items"
+                    rows="2"
+                    placeholder="Who is doing what next."
+                  ></textarea>
+                  <div
+                    class="note-source-panel hidden"
+                    data-note-source-panel="actionItems"
+                  ></div>
+                </section>
+                <section class="note-section" data-note="questions">
+                  <h3>
+                    <button
+                      class="note-title"
+                      type="button"
+                      data-note-source="questions"
+                      aria-expanded="false"
+                      title="Show what these open questions were written from"
+                    >
+                      <span>Open questions</span>
+                      <svg class="icon note-source-mark" aria-hidden="true">
+                        <use href="#i-chevron"></use>
+                      </svg>
+                    </button>
+                  </h3>
+                  <textarea
+                    id="note-questions"
+                    rows="2"
+                    placeholder="What remains unresolved."
+                  ></textarea>
+                  <div
+                    class="note-source-panel hidden"
+                    data-note-source-panel="questions"
+                  ></div>
+                </section>
 
-                  <section class="note-section ask-block" id="ask-block">
-                    <div class="ask-head">
-                      <h3>Ask about this meeting</h3>
-                      <span id="ask-hint" class="muted-note"
-                        >Unlocks once notes are written</span
-                      >
-                    </div>
-                    <div
-                      id="ask-thread"
-                      class="ask-thread"
-                      aria-live="polite"
-                    ></div>
-                    <form id="ask-form" class="ask-form" autocomplete="off">
-                      <input
-                        id="ask-input"
-                        type="text"
-                        placeholder="What did we decide about the launch date?"
-                        aria-label="Ask a question about this meeting"
-                        disabled
-                      />
-                      <button
-                        id="ask-button"
-                        class="btn btn-primary btn-compact"
-                        type="submit"
-                        disabled
-                      >
-                        Ask
-                      </button>
-                    </form>
-                  </section>
-                </div>
+                <section class="note-section ask-block" id="ask-block">
+                  <div class="ask-head">
+                    <h3>Ask about this meeting</h3>
+                    <span id="ask-hint" class="muted-note"
+                      >Unlocks once notes are written</span
+                    >
+                  </div>
+                  <div
+                    id="ask-thread"
+                    class="ask-thread"
+                    aria-live="polite"
+                  ></div>
+                  <form id="ask-form" class="ask-form" autocomplete="off">
+                    <input
+                      id="ask-input"
+                      type="text"
+                      placeholder="What did we decide about the launch date?"
+                      aria-label="Ask a question about this meeting"
+                      disabled
+                    />
+                    <button
+                      id="ask-button"
+                      class="btn btn-primary btn-compact"
+                      type="submit"
+                      disabled
+                    >
+                      Ask
+                    </button>
+                  </form>
+                </section>
               </div>
             </article>
 
