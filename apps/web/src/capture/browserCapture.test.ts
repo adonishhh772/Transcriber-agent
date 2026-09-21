@@ -7,6 +7,8 @@ import {
   getDisplaySurface,
   isMobileBrowser,
   isWholeScreen,
+  reacquireDisplay,
+  type CaptureStreams,
 } from "./browserCapture";
 
 describe("browser capture helpers", () => {
@@ -80,5 +82,148 @@ describe("browser capture helpers", () => {
     expect(describeDisplaySurface("window")).toBe("the shared window");
     expect(describeDisplaySurface("browser")).toBe("the shared tab");
     expect(describeDisplaySurface(null)).toBe("the surface you shared");
+  });
+});
+
+/* ---- Re-sharing a surface without losing the meeting -------------------- */
+
+type FakeTrack = {
+  kind: "audio" | "video";
+  readyState: string;
+  stop: ReturnType<typeof vi.fn>;
+  getSettings: () => { displaySurface?: string };
+};
+
+function fakeTrack(kind: "audio" | "video", surface?: string): FakeTrack {
+  return {
+    kind,
+    readyState: "live",
+    stop: vi.fn(function (this: FakeTrack) {
+      this.readyState = "ended";
+    }),
+    getSettings: () => (surface ? { displaySurface: surface } : {}),
+  };
+}
+
+function fakeStream(tracks: FakeTrack[]): MediaStream {
+  return {
+    getTracks: () => tracks,
+    getVideoTracks: () => tracks.filter((track) => track.kind === "video"),
+    getAudioTracks: () => tracks.filter((track) => track.kind === "audio"),
+  } as unknown as MediaStream;
+}
+
+/**
+ * `reacquireDisplay` builds a stream out of the new audio tracks, and Node has
+ * no MediaStream: the stub is the browser's constructor, no more.
+ */
+class FakeMediaStream {
+  constructor(readonly tracks: FakeTrack[]) {}
+  getTracks(): FakeTrack[] {
+    return this.tracks;
+  }
+  getVideoTracks(): FakeTrack[] {
+    return this.tracks.filter((track) => track.kind === "video");
+  }
+  getAudioTracks(): FakeTrack[] {
+    return this.tracks.filter((track) => track.kind === "audio");
+  }
+}
+
+/** The smallest capture graph `reacquireDisplay` can be handed. */
+function fakeCapture(): {
+  streams: CaptureStreams;
+  nodes: {
+    oldDisplaySource: { connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> };
+    displayAnalyser: { connect: ReturnType<typeof vi.fn> };
+    mixer: { connect: ReturnType<typeof vi.fn> };
+  };
+  created: Array<{ stream: MediaStream; connect: ReturnType<typeof vi.fn> }>;
+  oldDisplayTracks: FakeTrack[];
+} {
+  const created: Array<{
+    stream: MediaStream;
+    connect: ReturnType<typeof vi.fn>;
+  }> = [];
+  const oldDisplayTracks = [fakeTrack("video", "window"), fakeTrack("audio")];
+  const oldDisplay = fakeStream(oldDisplayTracks);
+  const oldDisplaySource = { connect: vi.fn(), disconnect: vi.fn() };
+  const displayAnalyser = { connect: vi.fn() };
+  const mixer = { connect: vi.fn() };
+  const streams = {
+    display: oldDisplay,
+    microphone: fakeStream([fakeTrack("audio")]),
+    mixed: fakeStream([fakeTrack("audio")]),
+    audioContext: {
+      createMediaStreamSource: (stream: MediaStream) => {
+        const node = { connect: vi.fn(), disconnect: vi.fn() };
+        created.push({ stream, connect: node.connect });
+        return node;
+      },
+    },
+    displaySource: oldDisplaySource,
+    microphoneSource: { connect: vi.fn(), disconnect: vi.fn() },
+    displayAnalyser,
+    microphoneAnalyser: { connect: vi.fn() },
+    mixedAnalyser: { connect: vi.fn() },
+    mixer,
+    destination: { connect: vi.fn() },
+  } as unknown as CaptureStreams;
+  return {
+    streams,
+    nodes: { oldDisplaySource, displayAnalyser, mixer },
+    created,
+    oldDisplayTracks,
+  };
+}
+
+describe("reacquireDisplay", () => {
+  it("rewires the new surface into the running graph and drops the old one", async () => {
+    const { streams, nodes, created, oldDisplayTracks } = fakeCapture();
+    const newVideo = fakeTrack("video", "window");
+    const newAudio = fakeTrack("audio");
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getDisplayMedia: () => Promise.resolve(fakeStream([newVideo, newAudio])),
+      },
+    });
+
+    const display = await reacquireDisplay(streams);
+
+    expect(getDisplaySurface(display)).toBe("window");
+    /* The new audio source feeds the same analyser and mixer as before, so the
+       recorder's destination and the transcriber's stream are untouched. */
+    expect(created).toHaveLength(1);
+    expect(created[0].connect).toHaveBeenCalledWith(nodes.displayAnalyser);
+    expect(created[0].connect).toHaveBeenCalledWith(nodes.mixer);
+    expect(nodes.oldDisplaySource.disconnect).toHaveBeenCalled();
+    expect(oldDisplayTracks.every((track) => track.readyState === "ended")).toBe(
+      true,
+    );
+    expect(streams.display.getVideoTracks()[0]).toBe(newVideo);
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses a surface that carries no system audio, leaving the meeting alone", async () => {
+    const { streams, oldDisplayTracks } = fakeCapture();
+    const silent = [fakeTrack("video", "window")];
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getDisplayMedia: () => Promise.resolve(fakeStream(silent)),
+      },
+    });
+
+    await expect(reacquireDisplay(streams)).rejects.toBeInstanceOf(
+      NoSystemAudioError,
+    );
+    /* The new stream is discarded, and the meeting keeps the surface it had. */
+    expect(silent[0].readyState).toBe("ended");
+    expect(oldDisplayTracks.every((track) => track.readyState === "live")).toBe(
+      true,
+    );
+    expect(streams.display.getVideoTracks()[0]).toBe(oldDisplayTracks[0]);
+    vi.unstubAllGlobals();
   });
 });

@@ -1,5 +1,6 @@
 import type { TranscriptSegment } from "../transcript/dedup";
 import type { AiActivityEntry } from "../intelligence/activity";
+import type { NoteSectionKey, NotesSource } from "../intelligence/notes";
 
 /** One question asked about a finished meeting, with the answer it received. */
 export type MeetingQuestion = {
@@ -27,6 +28,10 @@ export type MeetingRecord = {
   aiActivity?: AiActivityEntry[];
   /** Questions asked about this meeting, in order. */
   qa?: MeetingQuestion[];
+  /** What each notes pass was given, oldest first. */
+  noteSources?: NotesSource[];
+  /** Which pass wrote each section, as an index into `noteSources`. */
+  noteSourceRef?: Partial<Record<NoteSectionKey, number>>;
 };
 
 /**

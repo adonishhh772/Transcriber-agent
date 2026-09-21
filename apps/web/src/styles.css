@@ -1730,9 +1730,144 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
 
 .note-section h3 {
   margin-bottom: 7px;
+}
+
+/*
+ * The section title is the control that opens what the section was written
+ * from: "where did this come from?" is the first question anybody asks of an
+ * AI-written line, and the answer belongs one click away from the line itself.
+ */
+.note-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
   font-family: var(--font-serif);
   font-size: 1.12rem;
   font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--t-fast);
+}
+
+.note-title:hover {
+  color: var(--accent-dark);
+}
+
+.note-title:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 3px;
+}
+
+.note-source-mark {
+  width: 13px;
+  height: 13px;
+  opacity: 0;
+  transition:
+    opacity var(--t-fast),
+    transform var(--t-fast);
+}
+
+.note-section.has-source .note-source-mark {
+  opacity: 0.45;
+}
+
+/* Before a section has a source, the mark still answers a hover: the title is
+   the control that will open one. */
+.note-title:hover .note-source-mark,
+.note-title:focus-visible .note-source-mark {
+  opacity: 0.45;
+}
+
+.note-section.is-open .note-source-mark {
+  opacity: 1;
+  transform: rotate(180deg);
+}
+
+/*
+ * The notes scroll as one region, exactly like the transcript: a long meeting
+ * with long sections used to stretch the document page without limit.
+ */
+.notes-scroll {
+  max-height: min(62vh, 660px);
+  margin-top: 4px;
+  padding-right: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* What one notes pass was given: the content behind the section above it. */
+.note-source {
+  margin-top: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent-soft);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  animation: page-in var(--t-base);
+}
+
+.note-source-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.note-source-meta {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.03em;
+}
+
+.note-source-copy {
+  margin-left: auto;
+}
+
+.note-source-body {
+  display: grid;
+  gap: 7px;
+  max-height: 230px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.note-source-line {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 9px;
+  color: var(--text-secondary);
+  font-size: 0.79rem;
+  line-height: 1.55;
+}
+
+.note-source-line time {
+  padding-top: 2px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.note-source-label {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-source-empty {
+  color: var(--text-muted);
+  font-size: 0.79rem;
+  line-height: 1.6;
 }
 
 .note-section textarea {
@@ -1769,8 +1904,13 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   gap: 14px;
 }
 
+/* The ask block keeps the plain heading it always had; only the five note
+   sections turned their title into the control that opens their source. */
 .ask-head h3 {
   margin-bottom: 0;
+  font-family: var(--font-serif);
+  font-size: 1.12rem;
+  font-weight: 500;
 }
 
 .ask-head .muted-note {
@@ -2204,10 +2344,21 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
 
 /* ---- AI activity changelog ---- */
 
+/*
+ * The log scrolls on its own, like the transcript: a long meeting makes a long
+ * log, and the latest notes and the counters below it must not be pushed off
+ * the page by it.
+ */
 .ai-activity {
   display: grid;
+  align-content: start;
   gap: 12px;
+  max-height: calc(100vh - 420px);
+  min-height: 150px;
   margin: 10px 0 20px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ai-activity-row {
@@ -2221,6 +2372,7 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .ai-activity-meta time {
@@ -2237,14 +2389,56 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   text-transform: uppercase;
 }
 
-.ai-activity-row p {
+/* Opens the content the row's line was written from. */
+.ai-activity-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: var(--r-pill);
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  white-space: nowrap;
+  transition:
+    background var(--t-fast),
+    color var(--t-fast);
+}
+
+.ai-activity-expand .icon {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--t-fast);
+}
+
+.ai-activity-expand:hover {
+  background: var(--accent-wash);
+  color: var(--accent-dark);
+}
+
+.ai-activity-row.is-open .ai-activity-expand {
+  color: var(--accent-dark);
+}
+
+.ai-activity-row.is-open .ai-activity-expand .icon {
+  transform: rotate(180deg);
+}
+
+/* The panel keeps its own scroll, so a long pass never buries the log. */
+.ai-activity-source {
+  margin-top: 9px;
+}
+
+/* The changelog line itself. Class-scoped on purpose: the panel below a row
+   carries its own paragraphs, and a bare `p` rule here would restyle those. */
+.ai-activity-text {
   color: var(--text-secondary);
   font-size: 0.74rem;
   line-height: 1.55;
 }
 
 .ai-activity-row.is-error .ai-activity-kind,
-.ai-activity-row.is-error p {
+.ai-activity-row.is-error .ai-activity-text {
   color: var(--danger);
 }
 

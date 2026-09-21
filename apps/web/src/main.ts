@@ -7,6 +7,7 @@ import {
   describeDisplaySurface,
   getDisplaySurface,
   isWholeScreen,
+  reacquireDisplay,
   startCapture,
   stopCapture,
 } from "./capture/browserCapture";
@@ -56,11 +57,19 @@ import {
   type AiActivityKind,
 } from "./intelligence/activity";
 import {
+  describeNotesSource,
   formatActionItem,
   formatClock,
   hasNotes,
   normalizeResult,
+  notesSourceText,
+  sourceLines,
+  NOTE_SECTION_KEYS,
+  ROLLING_TRANSCRIPT_LINES,
   type IntelligenceResult,
+  type NoteSectionKey,
+  type NotesSource,
+  type SourceLine,
 } from "./intelligence/notes";
 import {
   getProvider,
@@ -252,6 +261,24 @@ const noteFields = {
   actionItems: $("note-action-items") as HTMLTextAreaElement,
   questions: $("note-questions") as HTMLTextAreaElement,
 };
+/* What each section was written from: the title opens it, the panel holds it. */
+const noteSourceToggles = new Map<NoteSectionKey, HTMLButtonElement>();
+const noteSourcePanels = new Map<NoteSectionKey, HTMLElement>();
+for (const key of NOTE_SECTION_KEYS) {
+  const toggle = document.querySelector<HTMLButtonElement>(
+    `[data-note-source="${key}"]`,
+  );
+  const panel = document.querySelector<HTMLElement>(
+    `[data-note-source-panel="${key}"]`,
+  );
+  if (toggle) noteSourceToggles.set(key, toggle);
+  if (panel) noteSourcePanels.set(key, panel);
+}
+/* The shared surface can disappear without ending the meeting. */
+const surfaceNotice = $("surface-notice");
+const surfaceNoticeText = $("surface-notice-text");
+const surfaceReshare = $("surface-reshare") as HTMLButtonElement;
+const floatReshare = $("float-reshare") as HTMLButtonElement;
 
 /* AI notes settings */
 const aiProvider = $("ai-provider") as HTMLSelectElement;
@@ -346,9 +373,25 @@ let screenNotes: ScreenSummary[] = [];
 let screenErrorShown = false;
 /** Changelog of every AI suggestion, oldest first. */
 let aiActivity: AiActivityEntry[] = [];
+/**
+ * Activity rows whose "what it read" panel is open, by index into `aiActivity`.
+ * Kept outside the DOM because the log is re-rendered on every new entry.
+ */
+const openActivitySources = new Set<number>();
 /** Questions asked about this meeting, oldest first. */
 let askThread: MeetingQuestion[] = [];
 let askingInFlight = false;
+/**
+ * What each notes pass was given, oldest first, and which pass wrote each
+ * section. Both are saved with the meeting, so the content behind a summary
+ * survives a reload and can be read months later.
+ */
+let noteSources: NotesSource[] = [];
+let noteSourceRef: Partial<Record<NoteSectionKey, number>> = {};
+/** True while the shared surface is gone but the meeting is still running. */
+let surfaceLost = false;
+/** True once the display track has actually ended, rather than been muted. */
+let surfaceEnded = false;
 
 /* ---- Speech-to-text engine --------------------------------------------
    Local Whisper stays available always; Deepgram is used when it is selected
@@ -1115,7 +1158,9 @@ window.addEventListener("keydown", (event) => {
     closeFramePreview();
     return;
   }
-  if (event.key === "Escape" && capture) void handleStop();
+  /* Escape asks before ending a meeting: a stray keypress used to stop the
+     recording outright, and a meeting must only end when the user says so. */
+  if (event.key === "Escape" && capture) openEndDialog();
   if (
     event.key === " " &&
     document.activeElement === document.body &&
@@ -1143,6 +1188,7 @@ async function handleStart(): Promise<void> {
     recovering = false;
     latestSummary = null;
     resetActivity();
+    resetNotesSources();
     restoreAskThread([]);
     setCaptureStatus(result.status);
     startedAt = Date.now();
@@ -1272,13 +1318,8 @@ async function handleStart(): Promise<void> {
           : "Transcribing locally · AI ready";
     startAudioRecording(result.streams);
     startScreenReading(result.streams);
-    capture.display
-      .getVideoTracks()[0]
-      ?.addEventListener(
-        "ended",
-        () => void handleStop("Screen sharing ended."),
-        { once: true },
-      );
+    /* Losing the share pauses system audio; it never ends the meeting. */
+    watchDisplaySurface(result.streams);
   } catch (caught) {
     if (transcription) await transcription.stop();
     transcription = null;
@@ -1330,6 +1371,134 @@ function recentScreenNotes(): Array<{ atMs: number; text: string }> {
     .map((note) => ({ atMs: note.atMs, text: note.text }));
 }
 
+/* ---- Losing the shared surface -----------------------------------------
+   A window share ends by itself in ordinary use: Chrome stops capturing a
+   window that is closed, pauses one that is minimised, and the browser's own
+   "Stop sharing" button ends the track. Every one of those used to end the
+   meeting outright and throw the rest of the conversation away. A meeting now
+   only ends when the user says so: the microphone keeps recording and
+   transcribing, and the user is told what happened and offered a re-share. */
+
+/** Watches the display tracks for the two ways a surface can go away. */
+function watchDisplaySurface(streams: CaptureStreams): void {
+  watchSharedTrack(streams.display.getVideoTracks()[0], {
+    ended:
+      "Sharing ended, so meeting audio and screen reading are paused. Your microphone is still recording and transcribing. Use “Share again” to pick the meeting audio back up — or end the meeting when you are ready.",
+    muted:
+      "Chrome paused the shared surface — a window that was minimised or hidden does this — so meeting audio may be missing. The microphone keeps recording. Share again, or end the meeting when you are ready.",
+  });
+  /* A share can also lose just its audio, which leaves screen reading working. */
+  watchSharedTrack(streams.display.getAudioTracks()[0], {
+    ended:
+      "The shared audio ended, so meeting audio is paused. Your microphone is still recording and transcribing. Share again to bring the meeting audio back, or end the meeting when you are ready.",
+    muted:
+      "Chrome paused the shared audio — a window that was minimised or hidden does this. The microphone keeps recording. Share again, or end the meeting when you are ready.",
+  });
+}
+
+function watchSharedTrack(
+  track: MediaStreamTrack | undefined,
+  messages: { ended: string; muted: string },
+): void {
+  if (!track) return;
+  track.addEventListener("ended", () => {
+    surfaceEnded = true;
+    showSurfaceLost(messages.ended);
+  });
+  track.addEventListener("mute", () => showSurfaceLost(messages.muted));
+  track.addEventListener("unmute", () => {
+    /* A muted window that comes back is not a lost surface. */
+    if (surfaceEnded) return;
+    clearSurfaceLost();
+  });
+}
+
+/** Says plainly that the meeting is still running without shared audio. */
+function showSurfaceLost(message: string): void {
+  if (!capture) return;
+  /* A muted window can flicker; only the first loss is worth a toast. */
+  const firstTime = !surfaceLost;
+  surfaceLost = true;
+  surfaceNoticeText.textContent = message;
+  surfaceNotice.classList.remove("hidden");
+  floatReshare.classList.remove("hidden");
+  livePill.textContent = "Recording · no shared audio";
+  liveLabel.textContent = "Recording";
+  stateElement.textContent = "Still recording · share the meeting window again";
+  if (firstTime) showToast("Shared audio stopped — the meeting is still recording");
+}
+
+function clearSurfaceLost(): void {
+  surfaceLost = false;
+  surfaceNotice.classList.add("hidden");
+  floatReshare.classList.add("hidden");
+  const paused = pauseButton.textContent === "Resume";
+  if (paused) {
+    livePill.textContent = "Paused";
+    stateElement.textContent = "Paused";
+    return;
+  }
+  livePill.textContent =
+    activeEngine === "deepgram"
+      ? "Transcribing · Deepgram"
+      : "Transcribing locally";
+  stateElement.textContent =
+    activeEngine === "deepgram" ? "Listening (Deepgram)" : "Transcribing locally";
+}
+
+/**
+ * Re-opens the picker and rewires the new surface into the running meeting.
+ *
+ * Everything else — the microphone, the recorder, the transcriber — is the
+ * same graph it was, so the transcript has no seam where the share changed.
+ */
+async function shareAgain(): Promise<void> {
+  const current = capture;
+  if (!current) return;
+  surfaceReshare.disabled = true;
+  floatReshare.disabled = true;
+  try {
+    const display = await reacquireDisplay(current);
+    surfaceEnded = false;
+    clearSurfaceLost();
+    watchDisplaySurface(current);
+    setCaptureStatus({
+      systemAudioReceived: true,
+      microphonePermission: "granted",
+      displaySurface: getDisplaySurface(display),
+    });
+    /* Screen reading follows the new surface, keeping everything already read. */
+    screenErrorShown = false;
+    beginScreenReading(current);
+    /* A meeting that was paused stays paused: re-sharing is not a resume. */
+    if (pauseButton.textContent === "Resume") screenReader?.pause();
+    showToast(
+      `Sharing ${describeDisplaySurface(getDisplaySurface(display))} again`,
+    );
+  } catch (error) {
+    if (error instanceof NoSystemAudioError) showError(error.message);
+    else if (error instanceof DOMException && error.name === "NotAllowedError")
+      showToast("Sharing was cancelled — the microphone keeps recording");
+    else
+      showError(
+        error instanceof Error
+          ? `${error.message} The microphone keeps recording.`
+          : "That surface could not be shared. The microphone keeps recording.",
+      );
+    /* The meeting is unaffected either way: the notice stays up. */
+    if (!surfaceLost)
+      showSurfaceLost(
+        "System audio is still missing. Share the meeting window again to bring it back — your microphone keeps recording meanwhile.",
+      );
+  } finally {
+    surfaceReshare.disabled = false;
+    floatReshare.disabled = false;
+  }
+}
+
+surfaceReshare.addEventListener("click", () => void shareAgain());
+floatReshare.addEventListener("click", () => void shareAgain());
+
 function handlePauseResume(): void {
   if (!transcription) return;
   if (pauseButton.textContent === "Pause") {
@@ -1349,7 +1518,14 @@ function handlePauseResume(): void {
   }
 }
 
-async function handleStop(message?: string): Promise<void> {
+/**
+ * Ends the meeting, and the only thing that does.
+ *
+ * Called from the End meeting button and its confirmation dialog, so nothing
+ * the browser or a stray keypress does can end a recording on the user's
+ * behalf.
+ */
+async function handleStop(): Promise<void> {
   const currentTranscription = transcription;
   transcription = null;
   /* The recorder is stopped before the capture graph is torn down, otherwise
@@ -1366,6 +1542,11 @@ async function handleStop(message?: string): Promise<void> {
   const currentCapture = capture;
   capture = null;
   await stopCapture(currentCapture);
+  /* Ending the meeting is the only thing that clears a lost-surface warning. */
+  surfaceLost = false;
+  surfaceEnded = false;
+  surfaceNotice.classList.add("hidden");
+  floatReshare.classList.add("hidden");
   if (recording) await storeMeetingAudio(sessionId, recording);
   floatAudioSize.classList.add("hidden");
   stopTimers();
@@ -1391,7 +1572,6 @@ async function handleStop(message?: string): Promise<void> {
   setMeetingState("completed");
   setView("workspace");
   await persistCurrentMeeting();
-  if (message) showToast(message);
   await finaliseNotes();
 }
 
@@ -1420,6 +1600,8 @@ async function finaliseNotes(): Promise<void> {
   setFinaliseState("finalising");
   notesSkeleton.classList.remove("hidden");
   try {
+    /* Snapshotted before the request: this is what the model is given. */
+    const notesSource = captureNotesSource(true);
     const result = await requestNotes(currentAiConfig(), {
       transcript: fullTranscript(),
       sessionId,
@@ -1427,7 +1609,7 @@ async function finaliseNotes(): Promise<void> {
       screenNotes: recentScreenNotes(),
     });
     notesSkeleton.classList.add("hidden");
-    applyNotes(result, "final");
+    applyNotes(result, "final", notesSource);
     await persistCurrentMeeting();
     setFinaliseState("done");
     showToast("Final notes are ready");
@@ -1465,13 +1647,14 @@ async function requestLatestIntelligence(): Promise<void> {
   rollingInFlight = true;
   lastRollingAt = Date.now();
   try {
+    const notesSource = captureNotesSource(false);
     const result = await requestNotes(currentAiConfig(), {
       transcript: transcriptText(),
       sessionId,
       final: false,
       screenNotes: recentScreenNotes(),
     });
-    applyNotes(result, "rolling");
+    applyNotes(result, "rolling", notesSource);
     deepseekState.textContent = "Connected";
   } catch (error) {
     const message =
@@ -1611,11 +1794,13 @@ function fullTranscript(): string {
  * Single place that syncs a fresh result into notes, state and persistence.
  *
  * The change is diffed against the previous notes first, so the activity log
- * can say what actually moved rather than just "notes updated".
+ * can say what actually moved rather than just "notes updated". The pass's own
+ * inputs travel with it, so every section can say what it was written from.
  */
 function applyNotes(
   result: IntelligenceResult,
   source: "rolling" | "final" = "rolling",
+  notesSource: NotesSource | null = null,
 ): void {
   const change = describeNotesChange(
     normalizeResult(latestGeneratedNotes),
@@ -1623,13 +1808,209 @@ function applyNotes(
   );
   latestGeneratedNotes = { ...result };
   latestSummary = { ...result };
-  renderNoteSections(result);
+  /* The pass is filed here, so the activity row that reports it can point at
+     the exact content it was reading. */
+  const passIndex = renderNoteSections(result, true, notesSource);
   aiOutput.textContent = formatIntelligence(latestSummary);
   finaliseState.textContent = "Notes just updated";
   syncAskState();
-  if (source === "final") logActivity("final", change ?? notesShape(result));
-  else if (change) logActivity("notes", change);
+  if (source === "final")
+    logActivity("final", change ?? notesShape(result), passIndex);
+  else if (change) logActivity("notes", change, passIndex);
 }
+
+/* ---- What each note section was written from ---------------------------
+   A summary is only as good as the material behind it. Every pass records its
+   own inputs — which transcript lines and which screen captures it was given —
+   so clicking a section title, or a row of the AI activity log, shows the
+   content that produced it. The record is a range into the meeting's own
+   transcript, which is append-only, so every pass of a meeting is kept. */
+
+/** Section titles the reader has opened, so a fresh pass keeps them open. */
+const openNoteSources = new Set<NoteSectionKey>();
+
+/**
+ * The meeting's lines, one per segment and in transcript order.
+ *
+ * Deliberately unfiltered: a pass's range points into this list by index, so
+ * dropping a line here would shift every range after it.
+ */
+function transcriptLines(): SourceLine[] {
+  return latestSegments.map((segment) => ({
+    atMs: segment.startMs,
+    text: segment.text.trim(),
+  }));
+}
+
+/** Provider · model that answered, for the record. */
+function notesProviderLabel(): string {
+  const config = currentAiConfig();
+  const provider = getProvider(config.provider);
+  return `${provider.label} · ${config.model.trim() || provider.defaultModel}`;
+}
+
+/** Which speech engine produced the lines the notes were written from. */
+function speechEngineLabel(): string {
+  return activeEngine === "deepgram" ? "Deepgram" : "Local Whisper";
+}
+
+/**
+ * Where a pass sits in the meeting: where the material it read ends.
+ *
+ * Clamped to the last line so that retrying the notes on a meeting reopened
+ * days later still says "at 42:10" rather than "at 4318:07".
+ */
+function notesPassClock(): number {
+  const lastEnd = latestSegments.length
+    ? latestSegments[latestSegments.length - 1].endMs
+    : 0;
+  const now = meetingClock();
+  return lastEnd ? Math.min(now, lastEnd) : now;
+}
+
+/**
+ * Snapshots the inputs of one pass.
+ *
+ * Taken before the request is sent: the record has to say what the model was
+ * actually given, not what happened to be on screen when the answer arrived.
+ * A rolling pass reads the same recent window the prompt does; the final pass
+ * reads everything.
+ */
+function captureNotesSource(final: boolean): NotesSource {
+  const total = latestSegments.length;
+  return {
+    atMs: notesPassClock(),
+    final,
+    model: notesProviderLabel(),
+    engine: speechEngineLabel(),
+    from: final ? 0 : Math.max(0, total - ROLLING_TRANSCRIPT_LINES),
+    to: total,
+    screenNotes: recentScreenNotes(),
+  };
+}
+
+/** Files one pass and returns its index. */
+function recordNotesSource(source: NotesSource): number {
+  noteSources.push(source);
+  return noteSources.length - 1;
+}
+
+/** Forgets every pass: a new meeting starts with nothing behind it. */
+function resetNotesSources(): void {
+  noteSources = [];
+  noteSourceRef = {};
+  openNoteSources.clear();
+  renderNoteSources();
+}
+
+/** Opens or closes the content behind one section. */
+function toggleNoteSource(key: NoteSectionKey): void {
+  const opening = !openNoteSources.has(key);
+  if (opening) openNoteSources.add(key);
+  else openNoteSources.delete(key);
+  renderNoteSources();
+  /* A section near the bottom of the scrolled notes would otherwise open its
+     content just out of sight. */
+  if (opening) noteSourcePanels.get(key)?.scrollIntoView({ block: "nearest" });
+}
+
+/** Paints every section's source panel from the pass it was written by. */
+function renderNoteSources(): void {
+  for (const key of NOTE_SECTION_KEYS) {
+    const panel = noteSourcePanels.get(key);
+    const toggle = noteSourceToggles.get(key);
+    const section = noteFields[key].closest<HTMLElement>(".note-section");
+    if (!panel || !toggle || !section) continue;
+    const ref = noteSourceRef[key];
+    const source = ref === undefined ? undefined : noteSources[ref];
+    const open = openNoteSources.has(key);
+    section.classList.toggle("has-source", Boolean(source));
+    section.classList.toggle("is-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    panel.classList.toggle("hidden", !open);
+    panel.textContent = "";
+    if (!open) continue;
+    panel.append(
+      source
+        ? buildNoteSource(source)
+        : noteSourceEmpty(
+            "Nothing has been written from the transcript here yet. Once the AI fills this section, the content it read appears here.",
+          ),
+    );
+  }
+}
+
+function noteSourceEmpty(message: string): HTMLElement {
+  const empty = document.createElement("p");
+  empty.className = "note-source-empty";
+  empty.textContent = message;
+  return empty;
+}
+
+/**
+ * One pass's inputs, rendered: what it read, and how to take it away.
+ *
+ * Shared by the note sections and the AI activity log, so the content behind a
+ * summary looks the same wherever it is opened from.
+ */
+function buildNoteSource(source: NotesSource): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "note-source";
+  const head = document.createElement("div");
+  head.className = "note-source-head";
+  const meta = document.createElement("span");
+  meta.className = "note-source-meta";
+  meta.textContent = describeNotesSource(source);
+  const copy = document.createElement("button");
+  copy.className = "btn btn-quiet btn-compact note-source-copy";
+  copy.type = "button";
+  copy.textContent = "Copy content";
+  copy.addEventListener("click", () =>
+    void copyText(
+      notesSourceText(source, transcriptLines()),
+      "Summarised content copied",
+    ),
+  );
+  head.append(meta, copy);
+
+  const body = document.createElement("div");
+  body.className = "note-source-body";
+  const lines = sourceLines(source, transcriptLines()).filter(
+    (line) => line.text.length > 0,
+  );
+  if (lines.length) {
+    for (const line of lines) body.append(sourceLineRow(line));
+  } else {
+    body.append(
+      noteSourceEmpty("Nothing had been transcribed yet when this pass ran."),
+    );
+  }
+  if (source.screenNotes.length) {
+    const label = document.createElement("p");
+    label.className = "note-source-label";
+    label.textContent = "Shared screen";
+    body.append(label);
+    for (const note of source.screenNotes) body.append(sourceLineRow(note));
+  }
+  panel.append(head, body);
+  return panel;
+}
+
+function sourceLineRow(line: SourceLine): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "note-source-line";
+  const seconds = Math.floor(line.atMs / 1000);
+  const stamp = document.createElement("time");
+  stamp.dateTime = `PT${seconds}S`;
+  stamp.textContent = formatClock(line.atMs);
+  const text = document.createElement("span");
+  text.textContent = line.text;
+  row.append(stamp, text);
+  return row;
+}
+
+for (const [key, toggle] of noteSourceToggles)
+  toggle.addEventListener("click", () => toggleNoteSource(key));
 
 function currentAiConfig(): AiConfig {
   return toAiConfig(loadAiSettings());
@@ -1672,6 +2053,10 @@ async function persistCurrentMeeting(): Promise<void> {
       screenNotes: screenNotes.length ? screenNotes : undefined,
       aiActivity: aiActivity.length ? aiActivity : undefined,
       qa: askThread.length ? askThread : undefined,
+      noteSources: noteSources.length ? noteSources : undefined,
+      noteSourceRef: Object.keys(noteSourceRef).length
+        ? noteSourceRef
+        : undefined,
     });
     await loadHistory();
   } catch (error) {
@@ -1922,8 +2307,19 @@ function openMeeting(id: string): void {
   screenNotes = meeting.screenNotes ?? [];
   for (const note of screenNotes) appendScreenNote(note);
   aiActivity = meeting.aiActivity ?? [];
-  renderActivity();
   restoreAskThread(meeting.qa ?? []);
+  /* The passes come back before anything that reads them renders: the notes
+     sections, and the activity rows that show what a pass was given. */
+  noteSources = meeting.noteSources ?? [];
+  noteSourceRef = meeting.noteSourceRef ?? {};
+  openNoteSources.clear();
+  openActivitySources.clear();
+  renderActivity();
+  /* A re-shared surface is not a state an opened meeting is in. */
+  surfaceLost = false;
+  surfaceEnded = false;
+  surfaceNotice.classList.add("hidden");
+  floatReshare.classList.add("hidden");
   renderNoteSections(
     normalizeResult(meeting.summary ?? meeting.generatedNotes),
     false,
@@ -2014,6 +2410,7 @@ function startTimers(): void {
   const start = startedAt ?? Date.now();
   stopTimers();
   startedAt = start;
+  holdMeetingLock();
   meterTimer = window.setInterval(updateMeters, 100);
   durationTimer = window.setInterval(() => {
     if (startedAt === null) return;
@@ -2030,6 +2427,60 @@ function stopTimers(): void {
   startedAt = null;
   duration.textContent = "00:00";
   floatDuration.textContent = "00:00";
+  releaseMeetingLock();
+}
+
+/**
+ * Resolves the held Web Lock, which ends the hold.
+ *
+ * Held for exactly as long as a meeting runs: `meetingLockWanted` says whether
+ * the meeting still wants it, because the lock may only be granted after the
+ * meeting has already ended.
+ */
+let endMeetingLock: (() => void) | null = null;
+let meetingLockWanted = false;
+
+/**
+ * Keeps Chrome from freezing this hidden tab while a meeting runs.
+ *
+ * Freezing stops every timer and callback in the page, which for this app means
+ * the meters, the recorder and the transcriber all stop — and it looks exactly
+ * like the transcript dying on its own during a quiet stretch, because a quiet
+ * stretch is when nobody is looking at this tab. Chromium's own list of pages it
+ * will not freeze includes one that "is currently holding a Web Lock", so the
+ * running meeting holds one; it also covers the state after the shared surface
+ * is lost, when this page is no longer capturing a screen. Freezing needs no
+ * opt-in from the app to be avoided, and the hold is dropped the moment the
+ * meeting ends.
+ *
+ * See chrome/browser/performance_manager/docs/freezing_opt_out_opt_in.md.
+ */
+function holdMeetingLock(): void {
+  if (meetingLockWanted) return;
+  const locks = navigator.locks;
+  if (!locks?.request) return;
+  meetingLockWanted = true;
+  void locks
+    .request(
+      "gather-meeting-active",
+      () =>
+        new Promise<void>((resolve) => {
+          endMeetingLock = resolve;
+          /* The meeting ended before the lock was granted. */
+          if (!meetingLockWanted) resolve();
+        }),
+    )
+    .catch(() => undefined)
+    .finally(() => {
+      endMeetingLock = null;
+    });
+}
+
+/** Drops the hold: the meeting is over and the tab may sleep again. */
+function releaseMeetingLock(): void {
+  meetingLockWanted = false;
+  endMeetingLock?.();
+  endMeetingLock = null;
 }
 function updateMeters(): void {
   if (!capture) return;
@@ -2342,6 +2793,16 @@ function startScreenReading(streams: CaptureStreams): void {
   screenErrorShown = false;
   clearScreenCapture();
   if (screenStatus) screenStatus.textContent = "";
+  beginScreenReading(streams);
+}
+
+/**
+ * Attaches a reader to the current shared surface.
+ *
+ * Split out of `startScreenReading` because re-sharing a surface has to start a
+ * reader without throwing away what the previous surface already showed.
+ */
+function beginScreenReading(streams: CaptureStreams): void {
   if (!currentAsrSettings().readScreen) return;
   /* Local-only mode promises that nothing leaves this device. Screen text can
      only come from a cloud vision model, so screens stay unread rather than
@@ -2372,6 +2833,8 @@ function startScreenReading(streams: CaptureStreams): void {
     /* The thumbnail is the only screen picture that is written down, so it is
        opt-out rather than always-on. */
     thumbnails: currentAsrSettings().keepScreenImages,
+    /* Meeting-relative, so a re-shared surface does not restart the clock. */
+    clock: meetingClock,
     describe: (dataUrl) =>
       describeScreen(currentAiConfig(), SCREEN_PROMPT, dataUrl),
     onSummary: (summary) => {
@@ -2399,6 +2862,8 @@ function startScreenReading(streams: CaptureStreams): void {
     showToast("Screen reading needs a shared screen. The transcript continues.");
     return;
   }
+  /* The previous surface's reader, if any, is done: its frames are gone. */
+  screenReader?.stop();
   screenReader = reader;
   /* Say exactly what is being read. The app only ever sees the one surface the
      browser handed over, so naming it is the honest answer to "what can it
@@ -2562,7 +3027,10 @@ function meetingClock(): number {
   return meetingStartedAt ? Date.now() - meetingStartedAt : 0;
 }
 
-function activityRow(entry: AiActivityEntry): HTMLElement {
+function activityRow(
+  entry: AiActivityEntry,
+  index: number,
+): HTMLElement {
   const row = document.createElement("div");
   row.className = `ai-activity-row is-${entry.kind}`;
   const meta = document.createElement("div");
@@ -2576,12 +3044,54 @@ function activityRow(entry: AiActivityEntry): HTMLElement {
   kind.textContent = ACTIVITY_LABELS[entry.kind];
   meta.append(stamp, kind);
   const text = document.createElement("p");
+  text.className = "ai-activity-text";
   text.textContent = entry.text;
   row.append(meta, text);
+
+  /* A row the AI wrote notes on can show the content behind its line: "summary
+     rewritten" is only checkable against what the model was reading when it
+     decided. Screen reads, questions and errors already carry their text. */
+  if (entry.sourceIndex !== undefined) {
+    const expanded = openActivitySources.has(index);
+    const toggle = document.createElement("button");
+    toggle.className = "ai-activity-expand";
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.title = "Show the transcript content this pass was given";
+    toggle.innerHTML =
+      '<svg class="icon" aria-hidden="true"><use href="#i-chevron"></use></svg>';
+    toggle.append(expanded ? "Hide what it read" : "What it read");
+    meta.append(toggle);
+    row.classList.toggle("is-open", expanded);
+    if (expanded) {
+      const panel = document.createElement("div");
+      panel.className = "ai-activity-source";
+      const source = noteSources[entry.sourceIndex];
+      panel.append(
+        source
+          ? buildNoteSource(source)
+          : noteSourceEmpty(
+              "The content behind this pass was not kept with the meeting.",
+            ),
+      );
+      row.append(panel);
+    }
+    toggle.addEventListener("click", () => {
+      if (openActivitySources.has(index)) openActivitySources.delete(index);
+      else openActivitySources.add(index);
+      renderActivity();
+    });
+  }
   return row;
 }
 
-/** Newest first: the newest line must be visible without scrolling. */
+/**
+ * The AI activity log, newest first.
+ *
+ * The list scrolls on its own, like the transcript: a long meeting makes a long
+ * log, and the notes and the numbers below it must not be pushed off the page by
+ * it.
+ */
 function renderActivity(): void {
   aiActivityList.textContent = "";
   if (!aiActivity.length) {
@@ -2589,28 +3099,37 @@ function renderActivity(): void {
     return;
   }
   for (let index = aiActivity.length - 1; index >= 0; index -= 1)
-    aiActivityList.append(activityRow(aiActivity[index]));
+    aiActivityList.append(activityRow(aiActivity[index], index));
 }
 
 /** Records one AI update, and keeps the meeting's stored copy in step. */
-function logActivity(kind: AiActivityKind, text: string): void {
+function logActivity(
+  kind: AiActivityKind,
+  text: string,
+  sourceIndex: number | null = null,
+): void {
   const trimmed = text.trim();
   const last = aiActivity[aiActivity.length - 1];
   /* A provider that is down fails on every rolling pass; one row that keeps its
-     time current beats a hundred identical ones. */
+     time current beats a hundred identical ones. The newest pass is also the
+     relevant one to point at. */
   if (last && last.kind === kind && last.text === trimmed) {
     last.atMs = meetingClock();
+    if (sourceIndex !== null) last.sourceIndex = sourceIndex;
     renderActivity();
     void persistCurrentMeeting();
     return;
   }
-  aiActivity.push({ atMs: meetingClock(), kind, text: trimmed });
+  const entry: AiActivityEntry = { atMs: meetingClock(), kind, text: trimmed };
+  if (sourceIndex !== null) entry.sourceIndex = sourceIndex;
+  aiActivity.push(entry);
   renderActivity();
   void persistCurrentMeeting();
 }
 
 function resetActivity(): void {
   aiActivity = [];
+  openActivitySources.clear();
   renderActivity();
 }
 
@@ -2834,10 +3353,18 @@ function setFinaliseState(
   if (state === "error") finaliseState.textContent = "Summary unavailable";
 }
 
+/**
+ * Paints every section's source panel from the pass it was written by.
+ *
+ * Returns the index of the pass it filed, or null when the result had nothing
+ * to put in any section — a pass that moved nothing is not the source of
+ * anything, and must not be recorded as one.
+ */
 function renderNoteSections(
   result: IntelligenceResult | null,
   highlight = true,
-): void {
+  notesSource: NotesSource | null = null,
+): number | null {
   const values: Record<keyof typeof noteFields, string> = {
     summary: result?.executiveSummary ?? "",
     keyPoints: toLines(result?.keyPoints),
@@ -2845,12 +3372,20 @@ function renderNoteSections(
     actionItems: toLines(result?.actionItems),
     questions: toLines(result?.questions),
   };
+  let passIndex: number | null = null;
+  const sourceFor = (): number | null => {
+    if (!notesSource) return null;
+    if (passIndex === null) passIndex = recordNotesSource(notesSource);
+    return passIndex;
+  };
   for (const [key, value] of Object.entries(values) as Array<
     [keyof typeof noteFields, string]
   >) {
     const field = noteFields[key];
     if (!value) continue;
     field.value = value;
+    const index = sourceFor();
+    if (index !== null) noteSourceRef[key] = index;
     if (!highlight) continue;
     const section = field.closest<HTMLElement>(".note-section");
     if (!section) continue;
@@ -2859,7 +3394,9 @@ function renderNoteSections(
     section.classList.add("is-updated");
     window.setTimeout(() => section.classList.remove("is-updated"), 1700);
   }
+  renderNoteSources();
   growAllFields();
+  return passIndex;
 }
 
 function toLines(value: unknown): string {
@@ -2903,6 +3440,8 @@ function currentMeetingRecord(): MeetingRecord {
     screenNotes: screenNotes.length ? screenNotes : undefined,
     aiActivity: aiActivity.length ? aiActivity : undefined,
     qa: askThread.length ? askThread : undefined,
+    noteSources: noteSources.length ? noteSources : undefined,
+    noteSourceRef: Object.keys(noteSourceRef).length ? noteSourceRef : undefined,
   };
 }
 

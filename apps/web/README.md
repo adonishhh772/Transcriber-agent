@@ -102,8 +102,72 @@ chip holds the sent frame **in memory only** for the meeting: it is never writte
 to IndexedDB or localStorage, the preview drops the decoded image when it closes,
 and the reader discards it the moment it stops. The thumbnails in the transcript
 are the stored ones, and they come back with the meeting. Escape closes the
-preview without ending the meeting, which is what Escape otherwise does while
-capturing.
+preview first; pressed again it opens the end-meeting dialog, exactly like the
+**End meeting** button.
+
+## The meeting ends when you say so
+
+Nothing the browser does ends a recording. A window share disappears in ordinary
+use — Chrome stops capturing a window that is closed, pauses one that is
+minimised, and the browser's own *Stop sharing* bar ends the track — and every
+one of those used to end the meeting outright and throw the rest of the
+conversation away.
+
+- Losing the surface now **pauses system audio and screen reading only**. The
+  microphone, the recorder and the transcriber stay on the same capture graph, so
+  the transcript carries on with the room in front of you.
+- A warning appears in the document and on the live bar, naming what happened,
+  and stays until the surface comes back.
+- **Share again** (in that warning, and on the live bar) re-opens the picker and
+  rewires the new surface into the running meeting: the new display source feeds
+  the same analyser and mixer, and the mixed destination the recorder and the
+  transcriber hold is untouched, so there is no seam in the transcript. Screen
+  reading restarts on the new surface and keeps everything already read; its
+  timestamps stay meeting-relative rather than restarting at 00:00.
+- If the new share carries no system audio, the app says so and keeps the surface
+  it had.
+- `Escape` no longer stops capture on its own: it opens the end-meeting dialog,
+  so a stray keypress can only ever ask.
+- A running meeting also holds a **Web Lock** for as long as it lasts. Chromium
+  will not freeze a hidden page that is holding one, and freezing stops every
+  timer and callback in the page — the meters, the recorder and the transcriber
+  with them. A meeting watched in another window is exactly a hidden tab, and a
+  quiet stretch is exactly when nobody is looking at this one, so the hold is one
+  of the two ways this page stays awake (capturing a screen is the other, and it
+  is gone once the share is lost). The hold is released the moment the meeting
+  ends.
+
+## Reading notes as a page, and as a claim
+
+The Gather-notes block scrolls as one region, like the transcript, so a long
+meeting cannot stretch the document page without limit.
+
+Every note section title is also the control that opens **what that section was
+written from**: the transcript lines and screen captures that were sent for the
+pass that wrote it, timestamped, with the pass (rolling or end-of-meeting), the
+provider · model that answered and the speech engine that produced the lines. The
+content can be copied on its own. A section that a later pass did not touch keeps
+the source of the pass that did.
+
+The **AI activity** tab answers the same question for every line in the log: a
+`Notes updated` or `Final notes` row carries a **What it read** control that opens
+the same panel for that pass, so "summary rewritten · 15 new key points" can be
+checked against the transcript lines the model was reading when it decided. The
+log itself scrolls in its own small region — a long meeting makes a long log, and
+the latest notes and the counters below it must not be pushed off the page by it.
+Rows for screen reads, questions and errors are not expandable: their text *is*
+their content.
+
+A pass is recorded as a **range of transcript lines**, not a copy of them. The
+transcript is append-only (`mergeOverlappingTranscript` never moves or rewrites a
+stored line, which a test pins), so a range stays exact for the life of the
+meeting and costs two numbers — which is why every pass of a meeting can be kept
+rather than a trimmed recent few. Only the screen captures travel with the pass.
+All of it is stored with the meeting, so the content behind a summary is still
+readable after a reload, a restart or a month in the library.
+
+Passes are recorded before the request is sent — the record says what the model
+was actually given, not what happened to be around when the answer came back.
 
 ## Requirements
 
@@ -141,7 +205,7 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state. A meeting is stored as soon as it has produced anything — words, screen captures, typed notes or kept audio — or has simply run for five seconds, so a silent meeting or one where only slides were shared is still listed rather than vanishing; those rows say what they do have (`No speech transcribed · 2 screen captures`) and the flag reads *Nothing captured* instead of claiming a transcript. A search that matches nothing says how many meetings it is hiding and offers **Clear search**, because "no meetings" and "filtered out" must not look the same.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), a transcript / AI-activity panel with search, auto-scroll and copy, and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs) that scrolls as one region, with each section title opening the content that section was written from; a transcript / AI-activity panel with search, auto-scroll and copy; and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, **Share again** when the shared surface is lost, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
 4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
 5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
 
@@ -161,7 +225,7 @@ Screen reading cannot be restricted to "the meeting" by the app itself: the brow
 
 ### AI activity
 
-The **AI activity** tab is a changelog, not a snapshot: every AI update appends one timestamped line saying what moved — `Summary rewritten · 2 new key points`, `1 decision dropped`, `Final notes · unchanged · 3 key points, 1 action item` — alongside each shared-screen read, each question asked and any provider error. Consecutive identical failures collapse into one row whose timestamp stays current, so a provider that is down overnight cannot bury the log. The log is stored with the meeting and comes back when it is reopened.
+The **AI activity** tab is a changelog, not a snapshot: every AI update appends one timestamped line saying what moved — `Summary rewritten · 2 new key points`, `1 decision dropped`, `Final notes · unchanged · 3 key points, 1 action item` — alongside each shared-screen read, each question asked and any provider error. Consecutive identical failures collapse into one row whose timestamp stays current, so a provider that is down overnight cannot bury the log. Every `Notes updated` and `Final notes` row also carries the pass it was written from, so **What it read** opens the transcript lines and screen captures behind that exact line. The log scrolls in its own region, beside the transcript's own scroll. The log is stored with the meeting — including the pass each row points at — and comes back when it is reopened.
 
 Questions and answers are stored with the meeting too, so a meeting can be re-opened and asked about days later. A question carries the **whole timestamped transcript**, and the notes are included only as a guide the model is told to overrule when the transcript disagrees with them — the transcript is the record, so an answer about minute 3 of a two-hour meeting is still grounded in what was actually said. The final notes pass reads the whole transcript for the same reason (the rolling pass is the only one that works from a recent tail, and that is a cost decision). Nothing but that material, plus the question, is sent to the configured provider.
 
@@ -328,6 +392,9 @@ npm run format
 `No meeting audio was shared. In the picker, share the meeting window (or Entire Screen) and tick Share system audio — or a browser tab with Share tab audio.`
 
 17. With **Summarise shared screens** on, confirm the toast names the surface that was picked (`Screen reading is limited to the shared window`, or the whole-screen warning), and that the picker offers no way to switch surfaces afterwards.
+18. With a window shared, minimise that window (or press the browser's *Stop sharing*): the meeting must **keep recording** — the microphone level still moves, the transcript still grows, a warning names the lost surface, and **Share again** brings system audio back with no gap in the transcript. Confirm the meeting only ends from **End meeting** (or Escape, which asks first).
+19. Click a note section title while notes are present and confirm the panel shows the timestamped transcript lines and screen captures that pass was given, that **Copy content** copies them, and that they are still there after a reload.
+20. On the **AI activity** tab, confirm the log scrolls inside its own region rather than pushing the latest notes off the page, and that **What it read** on a `Notes updated` row opens the content behind that line (and closes again).
 
 ## Production review status
 
@@ -335,10 +402,10 @@ npm run format
 - The display video track is never uploaded as video: when *Summarise shared screens* is on, the app draws one frame every ~25 seconds into a 640px-wide canvas, sends that downscaled JPEG to the configured vision model, and keeps the returned text. The 320px thumbnail kept alongside it is local-only, deleted with the meeting, and sent nowhere.
 - System audio comes from the display audio track and microphone audio comes from the separate microphone stream, avoiding duplicate input selection.
 - Transcript rendering uses DOM text nodes rather than unsafe HTML interpolation. Markdown export contains text only.
-- IndexedDB schema version 4 adds `screenNotes`, `aiActivity` and `qa` to a meeting record. Future changes must increment `MEETING_SCHEMA_VERSION` and migrate records.
+- IndexedDB schema version 4 adds `screenNotes`, `aiActivity` and `qa` to a meeting record; the notes-sample log (`noteSources` plus the per-section `noteSourceRef`) is more optional fields on the same store, so the schema version is unchanged. Future changes must increment `MEETING_SCHEMA_VERSION` and migrate records.
 - Unsupported browser messaging is shown when required capture APIs are missing. WebGPU model-load failure retries with WASM.
 - Rolling intelligence requests are debounced and bounded to the latest 100 segments to keep the cost of a long meeting sane. The final notes pass and every question read the **whole** transcript; requests abort after 45 seconds. Local transcription and persistence continue after DeepSeek outage or timeout.
-- Keyboard controls include Tab/Enter with visible focus rings, Space to pause or resume while the page body is focused, and Escape to close the end-meeting dialog or stop capture.
+- Keyboard controls include Tab/Enter with visible focus rings, Space to pause or resume while the page body is focused, and Escape to close the frame preview, close the end-meeting dialog, or open that dialog rather than stopping capture.
 
 ## Known limitations
 

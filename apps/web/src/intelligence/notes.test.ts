@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPrompt,
+  describeNotesSource,
   formatActionItem,
   hasNotes,
   normalizeResult,
+  notesSourceText,
   parseJsonLoose,
+  sourceLines,
+  type NotesSource,
 } from "./notes";
 
 describe("parseJsonLoose", () => {
@@ -155,5 +159,73 @@ describe("hasNotes", () => {
   it("detects whether anything was produced", () => {
     expect(hasNotes(normalizeResult({}))).toBe(false);
     expect(hasNotes(normalizeResult({ keyPoints: ["a"] }))).toBe(true);
+  });
+});
+
+describe("what a note section was written from", () => {
+  /** Four lines, of which the rolling pass below read the last two. */
+  const transcript = [
+    { atMs: 0, text: "Kick-off." },
+    { atMs: 60_000, text: "Scope talk." },
+    { atMs: 120_000, text: "We will freeze scope on Friday." },
+    { atMs: 124_000, text: "Priya takes the deck." },
+  ];
+  const rolling: NotesSource = {
+    atMs: 125_000,
+    final: false,
+    model: "DeepSeek · deepseek-chat",
+    engine: "Deepgram",
+    from: 2,
+    to: 4,
+    screenNotes: [{ atMs: 121_000, text: "Roadmap slide: Q3 marked done." }],
+  };
+
+  it("says which pass ran, over what, and with which model", () => {
+    const described = describeNotesSource(rolling);
+    expect(described).toContain("Rolling pass");
+    expect(described).toContain("at 02:05");
+    expect(described).toContain("2 transcript lines");
+    expect(described).toContain("1 screen capture");
+    expect(described).toContain("DeepSeek · deepseek-chat");
+    expect(described).toContain("lines from Deepgram");
+  });
+
+  it("describes a single line in the singular", () => {
+    expect(describeNotesSource({ ...rolling, to: 3 })).toContain(
+      "1 transcript line ·",
+    );
+  });
+
+  it("hands back the content itself, timestamped", () => {
+    const text = notesSourceText(rolling, transcript);
+    expect(text).toContain("[02:00] We will freeze scope on Friday.");
+    expect(text).toContain("[02:04] Priya takes the deck.");
+    expect(text).toContain("Shared screen:");
+    expect(text).toContain("[02:01] Roadmap slide: Q3 marked done.");
+  });
+
+  it("reads only the lines its own range covers", () => {
+    expect(sourceLines(rolling, transcript)).toEqual(transcript.slice(2));
+    expect(notesSourceText(rolling, transcript)).not.toContain("Kick-off.");
+  });
+
+  it("reads the meeting's whole transcript for a pass that started at line 0", () => {
+    const final: NotesSource = { ...rolling, final: true, from: 0, to: 4 };
+    expect(sourceLines(final, transcript)).toEqual(transcript);
+    expect(notesSourceText(final, transcript)).toContain("[00:00] Kick-off.");
+    expect(describeNotesSource(final)).toContain("the whole transcript");
+  });
+
+  it("says so when a pass ran before anything was transcribed", () => {
+    const empty: NotesSource = {
+      ...rolling,
+      from: 0,
+      to: 0,
+      screenNotes: [],
+    };
+    expect(sourceLines(empty, [])).toEqual([]);
+    expect(notesSourceText(empty, [])).toContain(
+      "Nothing had been transcribed yet.",
+    );
   });
 });

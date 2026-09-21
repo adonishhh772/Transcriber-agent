@@ -38,6 +38,14 @@ export type ScreenReaderOptions = {
   /** Width of that thumbnail. */
   thumbnailWidth?: number;
   now?: () => number;
+  /**
+   * Meeting-relative clock for a summary's timestamp.
+   *
+   * Without it a timestamp counts from this reader's own start, which is wrong
+   * for a reader that starts again mid-meeting (the shared surface was lost and
+   * re-shared): its captures would all claim to be at 00:00.
+   */
+  clock?: () => number;
 };
 
 export const DEFAULT_SCREEN_INTERVAL_MS = 25_000;
@@ -209,7 +217,9 @@ export class ScreenReader {
          frame that produced a different description. */
       this.frame = sample.dataUrl;
       this.options.onSummary({
-        atMs: this.now() - this.startedAt,
+        atMs: this.options.clock
+          ? this.options.clock()
+          : this.now() - this.startedAt,
         text,
         ...(sample.thumbnail ? { thumbnail: sample.thumbnail } : {}),
       });

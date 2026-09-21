@@ -21,6 +21,14 @@ export type AiActivityEntry = {
   atMs: number;
   kind: AiActivityKind;
   text: string;
+  /**
+   * Index into the meeting's notes passes for a row the AI wrote notes on.
+   *
+   * The line says what changed; the pass says what it was reading when it
+   * decided, so a rewritten summary can be checked against the transcript lines
+   * behind it instead of being taken on trust.
+   */
+  sourceIndex?: number;
 };
 
 export const ACTIVITY_LABELS: Record<AiActivityKind, string> = {

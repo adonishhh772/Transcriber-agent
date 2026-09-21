@@ -237,6 +237,51 @@ export async function startCapture(): Promise<{
   }
 }
 
+/**
+ * Swaps in a new shared surface without rebuilding the capture graph.
+ *
+ * A window share can end on its own — Chrome stops a window capture when that
+ * window is closed, and pauses it when the window is minimised — and the user
+ * may also press the browser's "Stop sharing". None of those is a decision to
+ * end the meeting, so the meeting keeps running and only the two inputs that
+ * come from the display stream (system audio and screen reading) are rewired.
+ *
+ * The microphone source, the mixer, the analysers and — crucially — the mixed
+ * destination that the recorder and the transcriber hold are the same objects
+ * throughout, so the transcript and the recording carry straight on.
+ */
+export async function reacquireDisplay(
+  capture: CaptureStreams,
+): Promise<MediaStream> {
+  const display = await navigator.mediaDevices.getDisplayMedia(
+    getDisplayMediaConstraints(),
+  );
+  const displayAudioTracks = display.getAudioTracks();
+
+  if (displayAudioTracks.length === 0) {
+    stopStream(display);
+    throw new NoSystemAudioError();
+  }
+
+  const source = capture.audioContext.createMediaStreamSource(
+    new MediaStream(displayAudioTracks),
+  );
+  source.connect(capture.displayAnalyser);
+  source.connect(capture.mixer);
+
+  const previousSource = capture.displaySource;
+  const previous = capture.display;
+  capture.displaySource = source;
+  capture.display = display;
+  try {
+    previousSource.disconnect();
+  } catch {
+    /* A source can already be disconnected when its track died. */
+  }
+  stopStream(previous);
+  return display;
+}
+
 export async function stopCapture(
   capture: CaptureStreams | null,
 ): Promise<void> {

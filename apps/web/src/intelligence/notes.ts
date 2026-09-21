@@ -63,6 +63,112 @@ export const SYSTEM_PROMPT =
   "Always return ONLY a single JSON object that matches the provided schema. " +
   "Prefer bullet/point-form phrasing, avoid repetition, and extract concrete actions.";
 
+/* ---------------------------------------------------------------------------
+   Where a note came from
+   ------------------------------------------------------------------------ */
+
+/** The editable note sections, in the order the document shows them. */
+export const NOTE_SECTION_KEYS = [
+  "summary",
+  "keyPoints",
+  "decisions",
+  "actionItems",
+  "questions",
+] as const;
+
+export type NoteSectionKey = (typeof NOTE_SECTION_KEYS)[number];
+
+/** One transcript line, as it was handed to the model. */
+export type SourceLine = { atMs: number; text: string };
+
+/**
+ * Exactly what one notes request was given.
+ *
+ * A summary is only as good as the material behind it, and "where did that come
+ * from?" is the first question anybody asks of an AI-written line. Every pass
+ * therefore records its own inputs — which transcript lines and which screen
+ * captures it read — so each section, and every row of the AI activity log, can
+ * show the content it was written from rather than asking the reader to trust
+ * it.
+ *
+ * The lines are held as a range into the meeting's own transcript, which is
+ * append-only, rather than as a copy: a pass costs two numbers, so every pass of
+ * a long meeting can be kept instead of a trimmed recent few.
+ */
+export type NotesSource = {
+  /** Milliseconds into the meeting when the pass ran. */
+  atMs: number;
+  /** The end-of-meeting pass rather than a rolling one. */
+  final: boolean;
+  /** Provider · model that answered, for the record. */
+  model: string;
+  /** Which speech engine produced the lines ("Deepgram", "Local Whisper"…). */
+  engine: string;
+  /** First transcript line the pass was given. */
+  from: number;
+  /** One past the last transcript line the pass was given. */
+  to: number;
+  /** What the shared screen showed during that pass, in order. */
+  screenNotes: SourceLine[];
+};
+
+/** How many transcript lines a rolling pass reads (the prompt's own window). */
+export const ROLLING_TRANSCRIPT_LINES = 100;
+
+/** The lines a pass read, following its range into `transcript`. */
+export function sourceLines(
+  source: NotesSource,
+  transcript: SourceLine[],
+): SourceLine[] {
+  return transcript.slice(source.from, source.to);
+}
+
+/** One-line description of a pass, shown above the content it read. */
+export function describeNotesSource(source: NotesSource): string {
+  const parts = [source.final ? "End-of-meeting pass" : "Rolling pass"];
+  parts.push(`at ${formatClock(source.atMs)}`);
+  const lines = source.to - source.from;
+  parts.push(
+    source.from === 0
+      ? "the whole transcript"
+      : `${lines} transcript line${lines === 1 ? "" : "s"}`,
+  );
+  if (source.screenNotes.length)
+    parts.push(
+      `${source.screenNotes.length} screen capture${source.screenNotes.length === 1 ? "" : "s"}`,
+    );
+  if (source.model) parts.push(source.model);
+  if (source.engine) parts.push(`lines from ${source.engine}`);
+  return parts.join(" · ");
+}
+
+/**
+ * The content of a pass, as plain text.
+ *
+ * Used by the copy action and by the tests: what was summarised is a fact worth
+ * being able to take away, not just look at. `transcript` is the meeting's own
+ * lines, which the pass's range points into.
+ */
+export function notesSourceText(
+  source: NotesSource,
+  transcript: SourceLine[] = [],
+): string {
+  const heading = describeNotesSource(source);
+  const body = sourceLines(source, transcript).map(
+    (line) => `[${formatClock(line.atMs)}] ${line.text}`,
+  );
+  const screen = source.screenNotes.map(
+    (note) => `[${formatClock(note.atMs)}] ${note.text}`,
+  );
+  return [
+    heading,
+    "",
+    "Transcript:",
+    ...(body.length ? body : ["Nothing had been transcribed yet."]),
+    ...(screen.length ? ["", "Shared screen:", ...screen] : []),
+  ].join("\n");
+}
+
 export function buildPrompt(
   transcript: string,
   final: boolean,
