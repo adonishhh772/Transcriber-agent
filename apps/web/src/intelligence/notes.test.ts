@@ -207,6 +207,11 @@ describe("what a note section was written from", () => {
   it("reads only the lines its own range covers", () => {
     expect(sourceLines(rolling, transcript)).toEqual(transcript.slice(2));
     expect(notesSourceText(rolling, transcript)).not.toContain("Kick-off.");
+    /* A rolling pass that happens to be the first one still says how many
+       lines it read: "the whole transcript" belongs to the final pass. */
+    const first: NotesSource = { ...rolling, from: 0 };
+    expect(describeNotesSource(first)).toContain("4 transcript lines");
+    expect(describeNotesSource(first)).not.toContain("the whole transcript");
   });
 
   it("reads the meeting's whole transcript for a pass that started at line 0", () => {

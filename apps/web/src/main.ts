@@ -165,7 +165,6 @@ const transcriptionLevel = $("transcription-level");
 const transcriptionWindows = $("transcription-windows");
 const transcriptionStatus = $("transcription-status");
 const transcriptOutput = $("transcript-output");
-const aiOutput = $("ai-output");
 const manualNotes = $("manual-notes") as HTMLTextAreaElement;
 const meetingTitleInput = $("meeting-title") as HTMLInputElement;
 const privacyMode = $("privacy-mode") as HTMLInputElement;
@@ -254,6 +253,7 @@ const askInput = $("ask-input") as HTMLInputElement;
 const askButton = $("ask-button") as HTMLButtonElement;
 const askThreadElement = $("ask-thread");
 const askHint = $("ask-hint");
+const askDock = $("ask-dock");
 const noteFields = {
   summary: $("note-summary") as HTMLTextAreaElement,
   keyPoints: $("note-key-points") as HTMLTextAreaElement,
@@ -1129,6 +1129,12 @@ allowCloudAudioWhenChosen();
 setView("library");
 setMeetingState("idle");
 syncAutoscrollButton();
+/* The recording bar grows and wraps as its content changes — a screen capture
+   appears, the audio size shows up — so the ask bar above it follows whatever
+   height it ends up with rather than a number guessed here. */
+if (typeof ResizeObserver !== "undefined")
+  new ResizeObserver(() => syncAskDockOffset()).observe(liveControls);
+window.addEventListener("resize", syncAskDockOffset);
 /* Load Whisper now rather than after the user has picked a screen: by the
    time a meeting starts the model is normally already in memory. */
 if (initialSupport.supported) {
@@ -1661,7 +1667,9 @@ async function requestLatestIntelligence(): Promise<void> {
       error instanceof Error
         ? error.message
         : "AI notes are unavailable; local transcription continues.";
-    aiOutput.textContent = message;
+    /* The AI activity log is the AI surface now, so the failure is reported
+       there — one row that keeps its timestamp current while the provider is
+       down — rather than in a notes panel the document already covers. */
     stateElement.textContent = "Local transcription active · AI unavailable";
     deepseekState.textContent = "Error";
     logActivity("error", message);
@@ -1811,7 +1819,6 @@ function applyNotes(
   /* The pass is filed here, so the activity row that reports it can point at
      the exact content it was reading. */
   const passIndex = renderNoteSections(result, true, notesSource);
-  aiOutput.textContent = formatIntelligence(latestSummary);
   finaliseState.textContent = "Notes just updated";
   syncAskState();
   if (source === "final")
@@ -2324,9 +2331,6 @@ function openMeeting(id: string): void {
     normalizeResult(meeting.summary ?? meeting.generatedNotes),
     false,
   );
-  aiOutput.textContent = formatIntelligence(
-    latestSummary ?? latestGeneratedNotes,
-  );
   const hasNotes = Boolean(
     meeting.summary ?? Object.keys(meeting.generatedNotes ?? {}).length,
   );
@@ -2359,34 +2363,6 @@ function exportMeeting(id: string): void {
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast("Markdown export saved");
-}
-function formatIntelligence(result: Record<string, unknown>): string {
-  return [
-    `Summary: ${String(result.executiveSummary ?? "")}`,
-    "",
-    "Key points:",
-    ...(Array.isArray(result.keyPoints)
-      ? result.keyPoints.map((item) => `- ${item}`)
-      : []),
-    "",
-    "Decisions:",
-    ...(Array.isArray(result.decisions)
-      ? result.decisions.map((item) => `- ${item}`)
-      : []),
-    "",
-    "Action items:",
-    ...(Array.isArray(result.actionItems)
-      ? result.actionItems.map(
-          (item) =>
-            `- ${typeof item === "string" ? item : JSON.stringify(item)}`,
-        )
-      : []),
-    "",
-    "Questions:",
-    ...(Array.isArray(result.questions)
-      ? result.questions.map((item) => `- ${item}`)
-      : []),
-  ].join("\n");
 }
 
 function setCaptureStatus(status: {
@@ -3167,12 +3143,18 @@ function askTurnRow(turn: MeetingQuestion): { row: HTMLElement; answer: HTMLElem
   return { row, answer };
 }
 
+/** Keeps the newest answer in view: the thread floats above the ask bar. */
+function scrollAskThreadToEnd(): void {
+  askThreadElement.scrollTop = askThreadElement.scrollHeight;
+}
+
 function renderAskThread(): void {
   askThreadElement.textContent = "";
   for (const turn of askThread) {
     const { row } = askTurnRow(turn);
     askThreadElement.append(row);
   }
+  scrollAskThreadToEnd();
 }
 
 /** Seed the thread from a stored meeting, after the notes have been restored. */
@@ -3198,6 +3180,7 @@ async function askAboutMeeting(): Promise<void> {
   answer.classList.add("is-pending");
   answer.textContent = "Reading the transcript…";
   askThreadElement.append(row);
+  scrollAskThreadToEnd();
   askingInFlight = true;
   syncAskState();
 
@@ -3217,6 +3200,7 @@ async function askAboutMeeting(): Promise<void> {
     turn.answer = reply;
     answer.classList.remove("is-pending");
     answer.textContent = reply;
+    scrollAskThreadToEnd();
     logActivity("question", question);
   } catch (error) {
     /* A failed question is not part of the meeting's record. */
@@ -3257,6 +3241,37 @@ document.addEventListener("pointerdown", (event) => {
    Shell behaviour
    ============================================================ */
 
+/**
+ * Shows the ask bar on the meeting page, and nowhere else.
+ *
+ * It is a meeting tool, like the recording bar: asking works against this
+ * meeting's transcript, notes and screen captures, so the library and settings
+ * have nothing to ask about. Unlike the recording bar it stays on the meeting
+ * page only — "Open meeting" is one click away on every other view.
+ */
+function syncAskDock(): void {
+  const onMeetingPage = document.body.dataset.view === "workspace";
+  askDock.classList.toggle("hidden", !onMeetingPage);
+  syncAskDockOffset();
+}
+
+/**
+ * Sits the ask bar exactly above the recording bar.
+ *
+ * The recording bar wraps and grows as the screen-capture chip and the audio
+ * size come and go, so its height is measured rather than assumed — a guessed
+ * offset would overlap it on a narrow window or when a capture row appears.
+ */
+function syncAskDockOffset(): void {
+  const height = liveControls.classList.contains("hidden")
+    ? 0
+    : liveControls.getBoundingClientRect().height;
+  document.documentElement.style.setProperty(
+    "--live-bar-offset",
+    height ? `${Math.ceil(height) + 10}px` : "0px",
+  );
+}
+
 function setView(view: ViewName): void {
   const changed = document.body.dataset.view !== view;
   for (const [name, element] of Object.entries(views))
@@ -3278,6 +3293,7 @@ function setView(view: ViewName): void {
   /* Never yank the page to the top unless the view actually changed. */
   if (changed) window.scrollTo(0, 0);
   syncReturnButton();
+  syncAskDock();
   /* The prepare screen owns the Start button, so make sure the model is on its
      way (or already loaded) as soon as it is opened. */
   if (view === "prepare" && initialSupport.supported)
@@ -3289,6 +3305,8 @@ function setMeetingState(state: MeetingState): void {
   /* The bar lives outside the views: it tracks the meeting, not the page. */
   liveControls.classList.toggle("hidden", state !== "live");
   syncReturnButton();
+  /* The recording bar appearing or going moves the ask bar with it. */
+  syncAskDockOffset();
 }
 
 /** Offers a way back to the meeting while it runs on another page. */
@@ -3341,10 +3359,12 @@ function setFinaliseState(
 ): void {
   /* The notes editor stays on screen for the whole meeting. It used to be shown
      only while "finalising", so generated notes were written into a hidden
-     panel and never seen. Only the progress strip and the error strip are
-     state-dependent. */
-  finalisePanel.classList.remove("hidden");
-  finalisePanel.setAttribute("aria-hidden", "false");
+     panel and never seen. The editor is not in this panel though — #finalise
+     holds only the progress strip and the error strip, so with neither showing
+     it was an empty bordered box above the first section. */
+  const showsStrip = state === "finalising" || state === "error";
+  finalisePanel.classList.toggle("hidden", !showsStrip);
+  finalisePanel.setAttribute("aria-hidden", String(!showsStrip));
   finaliseProgress.classList.toggle("hidden", state !== "finalising");
   finaliseError.classList.toggle("hidden", state !== "error");
   if (state === "listening") finaliseState.textContent = "Listening quietly";

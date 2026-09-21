@@ -129,7 +129,7 @@ export function describeNotesSource(source: NotesSource): string {
   parts.push(`at ${formatClock(source.atMs)}`);
   const lines = source.to - source.from;
   parts.push(
-    source.from === 0
+    source.final
       ? "the whole transcript"
       : `${lines} transcript line${lines === 1 ? "" : "s"}`,
   );

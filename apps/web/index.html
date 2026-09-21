@@ -1407,37 +1407,6 @@
                     data-note-source-panel="questions"
                   ></div>
                 </section>
-
-                <section class="note-section ask-block" id="ask-block">
-                  <div class="ask-head">
-                    <h3>Ask about this meeting</h3>
-                    <span id="ask-hint" class="muted-note"
-                      >Unlocks once notes are written</span
-                    >
-                  </div>
-                  <div
-                    id="ask-thread"
-                    class="ask-thread"
-                    aria-live="polite"
-                  ></div>
-                  <form id="ask-form" class="ask-form" autocomplete="off">
-                    <input
-                      id="ask-input"
-                      type="text"
-                      placeholder="What did we decide about the launch date?"
-                      aria-label="Ask a question about this meeting"
-                      disabled
-                    />
-                    <button
-                      id="ask-button"
-                      class="btn btn-primary btn-compact"
-                      type="submit"
-                      disabled
-                    >
-                      Ask
-                    </button>
-                  </form>
-                </section>
               </div>
             </article>
 
@@ -1553,12 +1522,6 @@
                   <p class="muted-note" id="ai-activity-empty">
                     Every AI update is logged here as the meeting runs.
                   </p>
-                </div>
-
-                <p class="section-label">Latest notes</p>
-                <div id="ai-output" class="ai-output">
-                  AI notes will appear here when privacy mode is disabled and
-                  DeepSeek is available.
                 </div>
 
                 <dl class="stat-list">
@@ -1747,6 +1710,40 @@
             </svg>
             End meeting
           </button>
+        </div>
+
+        <!-- Ask about this meeting: a floating bar like the recording one, so a
+             question is always in reach while the notes scroll. It shows on the
+             meeting page only, and rides above the recording bar while a meeting
+             is live. -->
+        <div class="ask-dock hidden" id="ask-dock">
+          <div id="ask-thread" class="ask-thread" aria-live="polite"></div>
+          <p id="ask-hint" class="ask-dock-hint muted-note">
+            Unlocks once notes are written
+          </p>
+          <form id="ask-form" class="ask-form ask-dock-form" autocomplete="off">
+            <span class="ask-dock-label" aria-hidden="true">
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-spark"></use>
+              </svg>
+              Ask
+            </span>
+            <input
+              id="ask-input"
+              type="text"
+              placeholder="What did we decide about the launch date?"
+              aria-label="Ask a question about this meeting"
+              disabled
+            />
+            <button
+              id="ask-button"
+              class="btn btn-primary btn-compact"
+              type="submit"
+              disabled
+            >
+              Ask
+            </button>
+          </form>
         </div>
       </main>
     </div>

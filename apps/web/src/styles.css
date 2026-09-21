@@ -1519,6 +1519,12 @@ dt {
   animation: page-in var(--t-slow);
 }
 
+/* With a meeting running, both floating bars sit at the foot of the page, so
+   the document keeps clear of the pair rather than just the recording bar. */
+body[data-view="workspace"][data-meeting-state="live"] .view-workspace {
+  padding-bottom: 200px;
+}
+
 .workspace-bar {
   display: flex;
   align-items: center;
@@ -1882,34 +1888,88 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   animation: section-update 1.5s ease-out;
 }
 
-/* ---- Ask about this meeting ---- */
+/* ---- Ask about this meeting -------------------------------------------
+   A floating bar, like the recording one: a question has to be in reach while
+   the notes scroll, and the foot of a long document is not in reach. It shows
+   on the meeting page only, and rides above the recording bar while a meeting
+   is live (see `.ask-dock` below the live bar rules). */
 
-.ask-head {
+.ask-dock {
+  position: fixed;
+  bottom: calc(var(--ask-dock-base, 24px) + var(--live-bar-offset, 0px));
+  left: 50%;
+  z-index: 9;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
+  flex-direction: column;
+  gap: 8px;
+  width: min(720px, calc(100vw - 48px));
+  transform: translateX(-50%);
 }
 
-/* The ask block keeps the plain heading it always had; only the five note
-   sections turned their title into the control that opens their source. */
-.ask-head h3 {
-  margin-bottom: 0;
-  font-family: var(--font-serif);
-  font-size: 1.12rem;
-  font-weight: 500;
+.ask-dock-form {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 0;
+  padding: 8px 10px 8px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: rgba(255, 254, 251, 0.97);
+  box-shadow: var(--shadow-float);
+  animation: controls-in var(--t-base);
 }
 
-.ask-head .muted-note {
-  flex-shrink: 0;
+.ask-dock-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.ask-dock-label .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.ask-dock-form input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+}
+
+.ask-dock-form input:focus {
+  outline: none;
+}
+
+/* The hint sits just above the bar, where the state of the box is read. */
+.ask-dock-hint {
+  margin: 0;
+  padding-left: 4px;
   font-size: 0.68rem;
-  text-align: right;
+  text-shadow: 0 1px 3px rgba(247, 245, 240, 0.9);
+}
+
+/* The thread floats above the bar and is the one thing here that may scroll:
+   a chat panel cannot grow past the window. */
+.ask-dock .ask-thread {
+  max-height: min(46vh, 380px);
+  margin-top: 0;
+  padding: 14px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
 }
 
 .ask-thread {
   display: grid;
   gap: 16px;
-  margin-top: 14px;
 }
 
 .ask-thread:empty {
@@ -1961,7 +2021,6 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
 .ask-form {
   display: flex;
   gap: 8px;
-  margin-top: 16px;
 }
 
 .ask-form input {
@@ -2318,23 +2377,11 @@ body[data-meeting-state="idle"] .workspace-actions #delete-meeting {
   outline-offset: 2px;
 }
 
-.ai-output {
-  min-height: 120px;
-  max-height: calc(100vh - 400px);
-  overflow-y: auto;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.71rem;
-  line-height: 1.65;
-  white-space: pre-wrap;
-}
-
 /* ---- AI activity changelog ---- */
 
 /*
  * The log scrolls on its own, like the transcript: a long meeting makes a long
- * log, and the latest notes and the counters below it must not be pushed off
- * the page by it.
+ * log, and the counters below it must not be pushed off the page by it.
  */
 .ai-activity {
   display: grid;
@@ -3018,8 +3065,7 @@ body:not([data-meeting-state="live"]) .panel-levels {
     display: grid;
   }
 
-  .transcript-list,
-  .ai-output {
+  .transcript-list {
     max-height: none;
   }
 
@@ -3085,6 +3131,19 @@ body:not([data-meeting-state="live"]) .panel-levels {
     justify-content: space-between;
     transform: none;
     animation: controls-in-flat var(--t-base);
+  }
+
+  /* The floating bars meet the same edges on a narrow window. */
+  .ask-dock {
+    --ask-dock-base: 12px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    transform: none;
+  }
+
+  .ask-dock-label {
+    display: none;
   }
 
   /* The bar is tight here, so the capture gets a smaller share of it. */

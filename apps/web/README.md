@@ -171,6 +171,27 @@ readable after a reload, a restart or a month in the library.
 Passes are recorded before the request is sent — the record says what the model
 was actually given, not what happened to be around when the answer came back.
 
+## Ask about this meeting
+
+Asking is a **floating bar on the meeting page**, built like the recording bar
+and living outside the views, so a question is always in reach: at the foot of a
+long document is exactly where it used to be out of reach. It shows on the
+meeting page only — asking works against this meeting's transcript, notes and
+screen captures, so the library and settings have nothing to ask about, and
+**Open meeting** is one click away everywhere else.
+
+- While a meeting is recording, the ask bar rides **above** the recording bar.
+  The recording bar wraps and grows as its content changes (a screen capture
+  appears, the audio size shows up), so its height is **measured** with a
+  `ResizeObserver` and fed to the ask bar as a CSS offset — a guessed number
+  would overlap it on a narrow window.
+- The thread of questions and answers floats above the bar, and is the one place
+  a scroll is unavoidable: a chat panel cannot grow past the window. It shows
+  the newest answer as it arrives.
+- The hint beside the bar says why the box is not usable yet (`Add an AI key in
+  Settings`, `Unlocks once notes are written`, `Off in local-only mode`,
+  `Answering…`), and the notes sections above stay exactly where they were.
+
 ## Requirements
 
 - Windows 10/11
@@ -207,8 +228,8 @@ Four views share one shell (navigation rail + main region):
 
 1. **Meeting library** — search, date-grouped meeting rows (Today, Yesterday, Previous 7 days, Older), hover actions for open/export/delete, and an empty state. A meeting is stored as soon as it has produced anything — words, screen captures, typed notes or kept audio — or has simply run for five seconds, so a silent meeting or one where only slides were shared is still listed rather than vanishing; those rows say what they do have (`No speech transcribed · 2 screen captures`) and the flag reads *Nothing captured* instead of claiming a transcript. A search that matches nothing says how many meetings it is hiding and offers **Clear search**, because "no meetings" and "filtered out" must not look the same.
 2. **Preparation** — editable meeting title, microphone / system-audio / display-surface status, and one primary "Start meeting" action. Settings live on their own page, reachable from the rail or a link at the bottom of the capture panel.
-3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), which flows as a page and whose section titles open the content each section was written from; a transcript / AI-activity panel with search, auto-scroll and copy, where the transcript and the AI log each scroll in their own region; and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, **Share again** when the shared surface is lost, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
-4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, a non-blocking provider error with Retry, and **Ask about this meeting**: a question box that unlocks once the AI has written notes and answers from this meeting's transcript, notes and screen descriptions alone.
+3. **Live workspace** — editorial notes document (personal notes plus editable Summary, Key points, Decisions, Action items and Open questions, which fill in from AI notes as the meeting runs), which flows as a page and whose section titles open the content each section was written from; a transcript / AI-activity panel with search, auto-scroll and copy, where the transcript and the AI log each scroll in their own region; **Ask about this meeting** as a floating bar at the foot of the page (see its own section below); and a floating control bar (status, elapsed time, microphone and system-audio levels, the newest screen capture, **Share again** when the shared surface is lost, pause/resume, end meeting). A running meeting does not trap you: the rail stays available, the bar follows you to every view, and **Open meeting** brings you back.
+4. **Completed meeting** — transcript and notes preserved, "Finalising notes" progress, Copy / Export Markdown / Delete, and a non-blocking provider error with Retry. **Ask about this meeting** is not part of this item any more: it is a floating bar on the meeting page (see below), live or completed.
 5. **Settings** — Privacy (local-only mode, meeting audio), the speech-to-text and AI-notes tabs when local-only mode is off, the shared key vault, and Local Whisper (model, chunk, overlap, compute) which is always available.
 
 The settings page follows local-only mode. **Both tabs are cloud features** — a speech engine that streams audio away and a notes provider that receives text — so turning local-only mode on hides the tab row, both panels and the key vault, leaving Privacy and Local Whisper. That is also why the capture switches live where they do: *Summarise shared screens* and *Keep the frame with each capture* are vision-provider settings and sit with AI notes, while *Save the meeting audio* stays on this device and sits in the Privacy block, reachable either way.
@@ -227,7 +248,7 @@ Screen reading cannot be restricted to "the meeting" by the app itself: the brow
 
 ### AI activity
 
-The **AI activity** tab is a changelog, not a snapshot: every AI update appends one timestamped line saying what moved — `Summary rewritten · 2 new key points`, `1 decision dropped`, `Final notes · unchanged · 3 key points, 1 action item` — alongside each shared-screen read, each question asked and any provider error. Consecutive identical failures collapse into one row whose timestamp stays current, so a provider that is down overnight cannot bury the log. Every `Notes updated` and `Final notes` row also carries the pass it was written from, so **What it read** opens the transcript lines and screen captures behind that exact line. The log scrolls in its own region, beside the transcript's own scroll. The log is stored with the meeting — including the pass each row points at — and comes back when it is reopened.
+The **AI activity** tab is a changelog, not a snapshot: every AI update appends one timestamped line saying what moved — `Summary rewritten · 2 new key points`, `1 decision dropped`, `Final notes · unchanged · 3 key points, 1 action item` — alongside each shared-screen read, each question asked and any provider error. Consecutive identical failures collapse into one row whose timestamp stays current, so a provider that is down overnight cannot bury the log. Every `Notes updated` and `Final notes` row also carries the pass it was written from, so **What it read** opens the transcript lines and screen captures behind that exact line. The tab is the log and nothing else — the notes themselves are the document to its left, so the log no longer repeats them as a "Latest notes" block. The log scrolls in its own region, beside the transcript's own scroll. The log is stored with the meeting — including the pass each row points at — and comes back when it is reopened.
 
 Questions and answers are stored with the meeting too, so a meeting can be re-opened and asked about days later. A question carries the **whole timestamped transcript**, and the notes are included only as a guide the model is told to overrule when the transcript disagrees with them — the transcript is the record, so an answer about minute 3 of a two-hour meeting is still grounded in what was actually said. The final notes pass reads the whole transcript for the same reason (the rolling pass is the only one that works from a recent tail, and that is a cost decision). Nothing but that material, plus the question, is sent to the configured provider.
 
@@ -396,7 +417,8 @@ npm run format
 17. With **Summarise shared screens** on, confirm the toast names the surface that was picked (`Screen reading is limited to the shared window`, or the whole-screen warning), and that the picker offers no way to switch surfaces afterwards.
 18. With a window shared, minimise that window (or press the browser's *Stop sharing*): the meeting must **keep recording** — the microphone level still moves, the transcript still grows, a warning names the lost surface, and **Share again** brings system audio back with no gap in the transcript. Confirm the meeting only ends from **End meeting** (or Escape, which asks first).
 19. Click a note section title while notes are present and confirm the panel shows the timestamped transcript lines and screen captures that pass was given, that **Copy content** copies them, and that they are still there after a reload.
-20. On the **AI activity** tab, confirm the log scrolls inside its own region rather than pushing the latest notes off the page, and that **What it read** on a `Notes updated` row opens the content behind that line (and closes again).
+20. On the **AI activity** tab, confirm the log scrolls inside its own region rather than pushing the counters off the page, that it no longer repeats the notes as a "Latest notes" block, and that **What it read** on a `Notes updated` row opens the content behind that line (and closes again).
+21. Confirm the **ask bar** floats at the foot of the meeting page on both a live and a completed meeting, that it sits just above the recording bar while one runs (including when a screen capture appears in that bar and it grows), and that it is absent on the library, prepare and settings pages. Confirm the answer thread floats above it and follows the newest answer.
 
 ## Production review status
 
