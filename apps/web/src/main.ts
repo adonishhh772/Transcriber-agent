@@ -180,6 +180,7 @@ const libraryVault = $("library-vault");
 const libraryVaultTitle = $("library-vault-title");
 const libraryVaultCopy = $("library-vault-copy");
 const libraryVaultPass = $("library-vault-pass") as HTMLInputElement;
+const libraryVaultHint = $("library-vault-hint");
 const libraryVaultToggle = $("library-vault-toggle") as HTMLButtonElement;
 const libraryVaultAction = $("library-vault-action") as HTMLButtonElement;
 const libraryVaultStatus = $("library-vault-status");
@@ -306,6 +307,7 @@ const aiRemember = $("remember-keys") as HTMLInputElement;
 const aiVault = $("vault");
 const aiVaultLabel = $("vault-label");
 const aiVaultPass = $("vault-pass") as HTMLInputElement;
+const aiVaultHint = $("vault-pass-hint");
 const aiVaultPassToggle = $("vault-pass-toggle") as HTMLButtonElement;
 const aiVaultAction = $("vault-action") as HTMLButtonElement;
 const aiVaultStatus = $("vault-status");
@@ -1086,6 +1088,10 @@ aiVaultPassToggle.addEventListener("click", () => {
   const hidden = aiVaultPass.type === "password";
   aiVaultPass.type = hidden ? "text" : "password";
   aiVaultPassToggle.textContent = hidden ? "Hide" : "Show";
+  aiVaultPassToggle.setAttribute(
+    "aria-label",
+    hidden ? "Hide passphrase" : "Show passphrase",
+  );
   aiVaultPassToggle.setAttribute("aria-pressed", String(hidden));
   aiVaultPass.focus();
 });
@@ -2187,9 +2193,9 @@ function syncLibraryLock(): void {
     ? "Meetings stay on this device, encrypted with the same vault as your API keys. Create a passphrase to begin."
     : "Unlock the vault to open saved meetings. The passphrase is the same one that protects your API keys.";
   libraryVaultAction.textContent = creating ? "Create vault" : "Unlock";
-  libraryVaultPass.placeholder = creating
+  libraryVaultHint.textContent = creating
     ? `At least ${MIN_PASSPHRASE_LENGTH} characters`
-    : "Your vault passphrase";
+    : "The passphrase for this device";
   if (!encryptionAvailable()) {
     libraryVaultAction.disabled = true;
     setLibraryVaultStatus(
@@ -2227,6 +2233,10 @@ libraryVaultToggle.addEventListener("click", () => {
   const hidden = libraryVaultPass.type === "password";
   libraryVaultPass.type = hidden ? "text" : "password";
   libraryVaultToggle.textContent = hidden ? "Hide" : "Show";
+  libraryVaultToggle.setAttribute(
+    "aria-label",
+    hidden ? "Hide passphrase" : "Show passphrase",
+  );
   libraryVaultToggle.setAttribute("aria-pressed", String(hidden));
   libraryVaultPass.focus();
 });
@@ -3858,26 +3868,24 @@ function setVaultStatus(message: string, tone: "ok" | "error" | "" = ""): void {
 function refreshVaultPanel(): void {
   const state = rememberState();
   aiVault.classList.toggle("hidden", !aiRemember.checked);
-  aiVaultLabel.textContent =
-    state === "unlocked"
-      ? "Vault unlocked"
-      : state === "locked"
-        ? "Unlock your vault"
-        : "Create a vault passphrase";
+  aiVaultLabel.textContent = "Passphrase";
   aiVaultAction.textContent =
     state === "locked"
       ? "Unlock"
       : state === "unlocked"
         ? "Update remembered key"
         : "Save & remember";
-  aiVaultPass.placeholder =
-    state === "locked"
-      ? "Your vault passphrase"
-      : `At least ${MIN_PASSPHRASE_LENGTH} characters`;
+  aiVaultHint.textContent =
+    state === "unlocked"
+      ? "Vault is open"
+      : state === "locked"
+        ? "The passphrase for this device"
+        : `At least ${MIN_PASSPHRASE_LENGTH} characters`;
   aiLock.classList.toggle("hidden", state !== "unlocked");
   /* The passphrase is re-masked whenever the panel is re-rendered. */
   aiVaultPass.type = "password";
   aiVaultPassToggle.textContent = "Show";
+  aiVaultPassToggle.setAttribute("aria-label", "Show passphrase");
   aiVaultPassToggle.setAttribute("aria-pressed", "false");
   if (!encryptionAvailable())
     setVaultStatus(

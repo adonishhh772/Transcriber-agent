@@ -413,27 +413,28 @@
             <p id="library-vault-copy">
               Unlock the vault to open saved meetings.
             </p>
-            <div class="field">
+            <div class="md-field">
+              <input
+                id="library-vault-pass"
+                type="password"
+                autocomplete="current-password"
+                placeholder=" "
+                aria-describedby="library-vault-hint"
+              />
               <label id="library-vault-label" for="library-vault-pass"
-                >Vault passphrase</label
+                >Passphrase</label
               >
-              <span class="key-row">
-                <input
-                  id="library-vault-pass"
-                  type="password"
-                  autocomplete="current-password"
-                  placeholder="Your vault passphrase"
-                />
-                <button
-                  id="library-vault-toggle"
-                  class="btn btn-quiet btn-compact"
-                  type="button"
-                  aria-pressed="false"
-                >
-                  Show
-                </button>
-              </span>
+              <button
+                id="library-vault-toggle"
+                class="md-field-toggle"
+                type="button"
+                aria-pressed="false"
+                aria-label="Show passphrase"
+              >
+                Show
+              </button>
             </div>
+            <p class="md-field-support" id="library-vault-hint"></p>
             <div class="ai-actions">
               <button
                 id="library-vault-action"
@@ -1016,27 +1017,26 @@
                 </label>
 
                 <div class="vault hidden" id="vault">
-                  <div class="field">
-                    <label id="vault-label" for="vault-pass"
-                      >Vault passphrase</label
+                  <div class="md-field">
+                    <input
+                      id="vault-pass"
+                      type="password"
+                      autocomplete="new-password"
+                      placeholder=" "
+                      aria-describedby="vault-pass-hint"
+                    />
+                    <label id="vault-label" for="vault-pass">Passphrase</label>
+                    <button
+                      id="vault-pass-toggle"
+                      class="md-field-toggle"
+                      type="button"
+                      aria-pressed="false"
+                      aria-label="Show passphrase"
                     >
-                    <span class="key-row">
-                      <input
-                        id="vault-pass"
-                        type="password"
-                        autocomplete="new-password"
-                        placeholder="At least 8 characters"
-                      />
-                      <button
-                        id="vault-pass-toggle"
-                        class="btn btn-quiet btn-compact"
-                        type="button"
-                        aria-pressed="false"
-                      >
-                        Show
-                      </button>
-                    </span>
+                      Show
+                    </button>
                   </div>
+                  <p class="md-field-support" id="vault-pass-hint"></p>
                   <div class="ai-actions">
                     <button
                       id="vault-action"
