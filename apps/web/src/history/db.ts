@@ -1,6 +1,17 @@
 import type { TranscriptSegment } from "../transcript/dedup";
 import type { AiActivityEntry } from "../intelligence/activity";
 import type { NoteSectionKey, NotesSource } from "../intelligence/notes";
+import { isVaultUnlocked, VaultLockedError } from "../intelligence/vault";
+import {
+  isPlainAudio,
+  isPlainMeeting,
+  isSealedAudio,
+  isSealedMeeting,
+  openSealedAudio,
+  openSealedMeeting,
+  sealAudioRecord,
+  sealMeetingRecord,
+} from "./seal";
 
 /** One question asked about a finished meeting, with the answer it received. */
 export type MeetingQuestion = {
@@ -50,7 +61,8 @@ export type MeetingAudioRecord = {
 const DB_NAME = "transcriber-meetings";
 const STORE = "meetings";
 const AUDIO_STORE = "audio";
-export const MEETING_SCHEMA_VERSION = 5;
+/** Version 6 seals every meeting and its audio with the vault key. */
+export const MEETING_SCHEMA_VERSION = 6;
 
 export function openMeetingDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -74,25 +86,51 @@ export function openMeetingDb(): Promise<IDBDatabase> {
   });
 }
 
+function requireUnlockedVault(): void {
+  if (!isVaultUnlocked()) throw new VaultLockedError();
+}
+
 export async function saveMeeting(meeting: MeetingRecord): Promise<void> {
+  requireUnlockedVault();
+  const sealed = await sealMeetingRecord(meeting);
   const db = await openMeetingDb();
-  await transaction(db, "readwrite", (store) => store.put(meeting));
+  await transaction(db, "readwrite", (store) => store.put(sealed));
 }
 
 export async function listMeetings(): Promise<MeetingRecord[]> {
+  requireUnlockedVault();
   const db = await openMeetingDb();
-  return transaction(db, "readonly", (store) => store.getAll()).then((items) =>
-    (items as MeetingRecord[]).sort((a, b) => b.updatedAt - a.updatedAt),
+  const items = (await transaction(db, "readonly", (store) =>
+    store.getAll(),
+  )) as unknown[];
+  const meetings: MeetingRecord[] = [];
+  for (const item of items) {
+    if (isPlainMeeting(item)) {
+      await saveMeeting(item);
+      meetings.push(item);
+      continue;
+    }
+    if (isSealedMeeting(item)) meetings.push(await openSealedMeeting(item));
+  }
+  meetings.sort(
+    (left, right) => right.updatedAt - left.updatedAt,
   );
+  return meetings;
 }
 
 export async function getMeeting(
   id: string,
 ): Promise<MeetingRecord | undefined> {
+  requireUnlockedVault();
   const db = await openMeetingDb();
-  return transaction(db, "readonly", (store) => store.get(id)) as Promise<
-    MeetingRecord | undefined
-  >;
+  const stored = await transaction(db, "readonly", (store) => store.get(id));
+  if (!stored) return undefined;
+  if (isPlainMeeting(stored)) {
+    await saveMeeting(stored);
+    return stored;
+  }
+  if (isSealedMeeting(stored)) return openSealedMeeting(stored);
+  return undefined;
 }
 
 export async function deleteMeeting(id: string): Promise<void> {
@@ -106,17 +144,27 @@ export async function deleteMeeting(id: string): Promise<void> {
    ------------------------------------------------------------------------ */
 
 export async function saveMeetingAudio(record: MeetingAudioRecord): Promise<void> {
+  requireUnlockedVault();
+  const sealed = await sealAudioRecord(record);
   const db = await openMeetingDb();
-  await runRequest(db, AUDIO_STORE, "readwrite", (store) => store.put(record));
+  await runRequest(db, AUDIO_STORE, "readwrite", (store) => store.put(sealed));
 }
 
 export async function getMeetingAudio(
   id: string,
 ): Promise<MeetingAudioRecord | undefined> {
+  requireUnlockedVault();
   const db = await openMeetingDb();
-  return runRequest(db, AUDIO_STORE, "readonly", (store) => store.get(id)) as Promise<
-    MeetingAudioRecord | undefined
-  >;
+  const stored = await runRequest(db, AUDIO_STORE, "readonly", (store) =>
+    store.get(id),
+  );
+  if (!stored) return undefined;
+  if (isPlainAudio(stored)) {
+    await saveMeetingAudio(stored);
+    return stored;
+  }
+  if (isSealedAudio(stored)) return openSealedAudio(stored);
+  return undefined;
 }
 
 export async function deleteMeetingAudio(id: string): Promise<void> {

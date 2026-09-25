@@ -22,12 +22,18 @@ The UI defaults to 6-second windows with 2 seconds of overlap, suppresses low-RM
 
 `Settings → Privacy → Save the meeting audio` (on by default) records the
 same mixed stream the transcriber hears and keeps it with the meeting, so a
-transcript can be replayed against its audio. The recording is stored in the
-browser in its own IndexedDB store (meeting audio is never loaded into the
-library list, and never uploaded), appears as a player plus **Download audio**
-in the meeting view, and is deleted with the meeting. It sits in the Privacy
-block because it is a this-device setting, and it stays reachable when
-local-only mode hides the cloud tabs.
+transcript can be replayed against its audio. The recording is sealed with the
+vault key and stored in the browser in its own IndexedDB store (meeting audio
+is never loaded into the library list, and never uploaded), appears as a player
+plus **Download audio** in the meeting view, and is deleted with the meeting.
+It sits in the Privacy block because it is a this-device setting, and it stays
+reachable when local-only mode hides the cloud tabs.
+
+Saved meetings — transcript, notes, screen notes, questions, and audio — are
+encrypted with the same passphrase vault as remembered API keys (AES-256-GCM,
+PBKDF2-SHA256). The library stays locked until that passphrase is entered.
+Forgetting an API key does not erase the vault, because that would make the
+meetings unreadable.
 
 ## What screen reading can and cannot see
 

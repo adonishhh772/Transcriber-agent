@@ -385,7 +385,7 @@
             </button>
           </header>
 
-          <div class="library-bar">
+          <div class="library-bar" id="library-bar">
             <label class="search-field" for="history-search">
               <svg class="icon" aria-hidden="true">
                 <use href="#i-search"></use>
@@ -403,6 +403,53 @@
               Latest: <span id="dashboard-latest">No meetings yet</span>
             </p>
           </div>
+
+          <section
+            id="library-vault"
+            class="library-vault hidden"
+            aria-labelledby="library-vault-title"
+          >
+            <h2 id="library-vault-title">Meetings are sealed</h2>
+            <p id="library-vault-copy">
+              Unlock the vault to open saved meetings.
+            </p>
+            <div class="field">
+              <label id="library-vault-label" for="library-vault-pass"
+                >Vault passphrase</label
+              >
+              <span class="key-row">
+                <input
+                  id="library-vault-pass"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="Your vault passphrase"
+                />
+                <button
+                  id="library-vault-toggle"
+                  class="btn btn-quiet btn-compact"
+                  type="button"
+                  aria-pressed="false"
+                >
+                  Show
+                </button>
+              </span>
+            </div>
+            <div class="ai-actions">
+              <button
+                id="library-vault-action"
+                class="btn btn-primary"
+                type="button"
+              >
+                Unlock
+              </button>
+              <span
+                id="library-vault-status"
+                class="ai-status"
+                role="status"
+                aria-live="polite"
+              ></span>
+            </div>
+          </section>
 
           <div id="history-list" class="meeting-list" aria-live="polite">
             <p class="list-placeholder">No saved meetings yet.</p>
@@ -960,9 +1007,10 @@
                   <span>
                     <strong>Remember keys on this device</strong>
                     <small
-                      >Your speech-to-text and AI notes keys are sealed together
-                      in one encrypted vault, readable only with the passphrase
-                      below. Without it, each key lives only for this tab.</small
+                      >Your speech-to-text and AI notes keys, and every saved
+                      meeting, are sealed together in one encrypted vault,
+                      readable only with the passphrase below. Without it, each
+                      key lives only for this tab and meetings stay locked.</small
                     >
                   </span>
                 </label>

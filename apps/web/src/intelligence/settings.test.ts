@@ -72,12 +72,22 @@ describe("remembered keys", () => {
     expect(getApiKey("openai")).toBe("sk-session");
   });
 
-  it("erases the vault when forgetting while locked, and says so", async () => {
+  it("keeps the vault when forgetting while locked, because meetings share it", async () => {
     await rememberApiKey("openai", "sk-remembered", PASSPHRASE);
     lockVault();
     const result = await forgetRememberedKey("openai");
-    expect(result.erasedVault).toBe(true);
-    expect(rememberState()).toBe("none");
+    expect(result.erasedVault).toBe(false);
+    expect(result.needsUnlock).toBe(true);
+    expect(rememberState()).toBe("locked");
+  });
+
+  it("removes the last key without erasing the vault", async () => {
+    await rememberApiKey("openai", "sk-remembered", PASSPHRASE);
+    const result = await forgetRememberedKey("openai");
+    expect(result.erasedVault).toBe(false);
+    expect(result.needsUnlock).toBe(false);
+    expect(rememberState()).toBe("unlocked");
+    expect(getApiKey("openai")).toBe("");
   });
 
   it("removes only the requested provider while unlocked", async () => {

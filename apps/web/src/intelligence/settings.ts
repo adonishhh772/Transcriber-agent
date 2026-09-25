@@ -15,7 +15,6 @@ import { DEFAULT_PROVIDER, getProvider, type ProviderId } from "./providers";
 import type { AiConfig } from "./client";
 import {
   createVault,
-  eraseVault,
   isVaultUnlocked,
   lockVault,
   readVault,
@@ -176,26 +175,20 @@ export function lockRememberedKeys(): void {
 
 export async function forgetRememberedKey(provider: ProviderId): Promise<{
   erasedVault: boolean;
+  /** Set when the vault is locked, so the key cannot be removed yet. */
+  needsUnlock: boolean;
 }> {
   if (!isVaultUnlocked()) {
-    /* Ciphertext cannot be edited without the passphrase, so the honest option
-       is to erase the whole vault. */
-    if (readVault()) {
-      eraseVault();
-      return { erasedVault: true };
-    }
-    return { erasedVault: false };
-  }
-  const remaining = { ...unlockedEntries() };
-  delete remaining[provider];
-  if (Object.keys(remaining).length === 0) {
-    eraseVault();
-    return { erasedVault: true };
+    /* The same vault seals saved meetings. Erasing it while locked would make
+       those meetings unreadable, so a locked key can only be forgotten after
+       the passphrase is entered. */
+    if (readVault()) return { erasedVault: false, needsUnlock: true };
+    return { erasedVault: false, needsUnlock: false };
   }
   await updateVault((entries) => {
     delete entries[provider];
   });
-  return { erasedVault: false };
+  return { erasedVault: false, needsUnlock: false };
 }
 
 /* ---------------------------------------------------------------------------

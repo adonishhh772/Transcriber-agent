@@ -846,6 +846,38 @@ dt {
   line-height: 1.6;
 }
 
+.library-vault {
+  max-width: 32rem;
+  margin: 48px auto 0;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-secondary);
+}
+
+.library-vault h2 {
+  margin-bottom: 8px;
+  font-family: var(--font-serif);
+  font-size: 1.8rem;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
+
+.library-vault p {
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.library-vault .field {
+  display: grid;
+  gap: 6px;
+}
+
+.library-vault .ai-actions {
+  margin-top: 12px;
+}
+
 /* ============================================================
    2. Preparation
    ============================================================ */

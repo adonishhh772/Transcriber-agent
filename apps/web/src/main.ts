@@ -99,6 +99,7 @@ import {
   MIN_PASSPHRASE_LENGTH,
   createVault,
   encryptionAvailable,
+  isVaultUnlocked,
   updateVault,
 } from "./intelligence/vault";
 import {
@@ -174,6 +175,14 @@ const backendUrl = $("backend-url") as HTMLInputElement;
 const apiToken = $("api-token") as HTMLInputElement;
 const historySearch = $("history-search") as HTMLInputElement;
 const historyList = $("history-list");
+const libraryBar = $("library-bar");
+const libraryVault = $("library-vault");
+const libraryVaultTitle = $("library-vault-title");
+const libraryVaultCopy = $("library-vault-copy");
+const libraryVaultPass = $("library-vault-pass") as HTMLInputElement;
+const libraryVaultToggle = $("library-vault-toggle") as HTMLButtonElement;
+const libraryVaultAction = $("library-vault-action") as HTMLButtonElement;
+const libraryVaultStatus = $("library-vault-status");
 const modelInput = $("model-input") as HTMLInputElement;
 const chunkInput = $("chunk-input") as HTMLInputElement;
 const overlapInput = $("overlap-input") as HTMLInputElement;
@@ -691,6 +700,12 @@ for (const trigger of document.querySelectorAll<HTMLButtonElement>(
 )) {
   trigger.addEventListener("click", () => {
     const target = trigger.dataset.view as ViewName | undefined;
+    if (target === "prepare" && !isVaultUnlocked()) {
+      setView("library");
+      syncLibraryLock();
+      libraryVaultPass.focus();
+      return;
+    }
     if (target === "prepare") {
       prepareTitle.value = meetingTitleInput.value || meetingTitle;
     }
@@ -1055,10 +1070,12 @@ aiRemember.addEventListener("change", () => {
     forgetRememberedKey(loadAiSettings().provider),
     forgetRememberedKey("deepgram"),
   ]).then((results) => {
-    const erased = results.some((result) => result.erasedVault);
+    const needsUnlock = results.some((result) => result.needsUnlock);
     setVaultStatus(
-      erased ? "Vault erased." : "Keys are no longer remembered.",
-      "ok",
+      needsUnlock
+        ? "Unlock the vault to forget these keys. Saved meetings use the same vault, so it is not erased while locked."
+        : "Keys are no longer remembered.",
+      needsUnlock ? "error" : "ok",
     );
     syncAiStatusSummary();
   });
@@ -1080,7 +1097,8 @@ aiVaultPass.addEventListener("keydown", (event) => {
 });
 aiLock.addEventListener("click", () => {
   lockRememberedKeys();
-  /* Locking means "stop using the keys", not just "hide the stored copy". */
+  /* Locking means "stop using the keys", not just "hide the stored copy".
+     Meetings are sealed with the same key, so the library locks too. */
   clearSessionKey(loadAiSettings().provider);
   clearSessionKey("deepgram");
   syncAiSettingsUi();
@@ -1090,6 +1108,7 @@ aiLock.addEventListener("click", () => {
     "ok",
   );
   syncAiStatusSummary();
+  void loadHistory();
 });
 
 aiKeyToggle.addEventListener("click", () => {
@@ -1102,11 +1121,11 @@ aiKeyToggle.addEventListener("click", () => {
 aiForget.addEventListener("click", () => {
   const provider = loadAiSettings().provider;
   clearSessionKey(provider);
-  void forgetRememberedKey(provider).then(({ erasedVault }) => {
+  void forgetRememberedKey(provider).then(({ needsUnlock }) => {
     syncAiSettingsUi();
     setAiStatus(
-      erasedVault
-        ? "Key forgotten. The vault was erased because it cannot be edited while locked."
+      needsUnlock
+        ? "Unlock the vault to forget this key. Saved meetings use the same vault, so it is not erased while locked."
         : "Key forgotten.",
     );
     setVaultStatus("");
@@ -1118,11 +1137,13 @@ aiForget.addEventListener("click", () => {
 deepgramTest.addEventListener("click", () => void runDeepgramTest());
 deepgramForget.addEventListener("click", () => {
   clearSessionKey("deepgram");
-  void forgetRememberedKey("deepgram").then(({ erasedVault }) => {
+  void forgetRememberedKey("deepgram").then(({ needsUnlock }) => {
     deepgramKey.value = "";
     syncAsrSettingsUi();
     setDeepgramStatus(
-      erasedVault ? "Key forgotten. The vault was erased." : "Key forgotten.",
+      needsUnlock
+        ? "Unlock the vault to forget this key. Saved meetings use the same vault, so it is not erased while locked."
+        : "Key forgotten.",
       "ok",
     );
   });
@@ -1237,6 +1258,16 @@ pauseButton.addEventListener("click", () => handlePauseResume());
 pauseIconButton.addEventListener("click", () => handlePauseResume());
 
 async function handleStart(): Promise<void> {
+  if (!isVaultUnlocked()) {
+    setView("library");
+    syncLibraryLock();
+    setLibraryVaultStatus(
+      "Create or unlock your vault before starting a meeting.",
+      "error",
+    );
+    libraryVaultPass.focus();
+    return;
+  }
   startButton.disabled = true;
   hideError();
   try {
@@ -2133,7 +2164,87 @@ async function persistCurrentMeeting(): Promise<void> {
   }
 }
 
+function setLibraryVaultStatus(
+  message: string,
+  tone: "ok" | "error" | "" = "",
+): void {
+  libraryVaultStatus.textContent = message;
+  libraryVaultStatus.className = `ai-status${tone ? ` is-${tone}` : ""}`;
+}
+
+/** Show the passphrase gate whenever meetings cannot be decrypted. */
+function syncLibraryLock(): void {
+  const locked = !isVaultUnlocked();
+  libraryVault.classList.toggle("hidden", !locked);
+  libraryBar.classList.toggle("hidden", locked);
+  historyList.classList.toggle("hidden", locked);
+  if (!locked) return;
+  const creating = rememberState() === "none";
+  libraryVaultTitle.textContent = creating
+    ? "Seal your meetings"
+    : "Meetings are locked";
+  libraryVaultCopy.textContent = creating
+    ? "Meetings stay on this device, encrypted with the same vault as your API keys. Create a passphrase to begin."
+    : "Unlock the vault to open saved meetings. The passphrase is the same one that protects your API keys.";
+  libraryVaultAction.textContent = creating ? "Create vault" : "Unlock";
+  libraryVaultPass.placeholder = creating
+    ? `At least ${MIN_PASSPHRASE_LENGTH} characters`
+    : "Your vault passphrase";
+  if (!encryptionAvailable()) {
+    libraryVaultAction.disabled = true;
+    setLibraryVaultStatus(
+      "Encryption needs HTTPS or localhost, so meetings cannot be saved here.",
+      "error",
+    );
+  }
+}
+
+async function runLibraryVaultAction(): Promise<void> {
+  const passphrase = libraryVaultPass.value;
+  const creating = rememberState() === "none";
+  libraryVaultAction.disabled = true;
+  setLibraryVaultStatus(creating ? "Encrypting…" : "Unlocking…");
+  try {
+    if (creating) await createVault({}, passphrase);
+    else await unlockRememberedKeys(passphrase);
+    libraryVaultPass.value = "";
+    setLibraryVaultStatus("");
+    syncAiSettingsUi();
+    syncAsrSettingsUi();
+    await loadHistory();
+  } catch (error) {
+    setLibraryVaultStatus(
+      error instanceof Error ? error.message : "The vault could not be opened.",
+      "error",
+    );
+  } finally {
+    libraryVaultAction.disabled = !encryptionAvailable();
+  }
+}
+
+libraryVaultAction.addEventListener("click", () => void runLibraryVaultAction());
+libraryVaultToggle.addEventListener("click", () => {
+  const hidden = libraryVaultPass.type === "password";
+  libraryVaultPass.type = hidden ? "text" : "password";
+  libraryVaultToggle.textContent = hidden ? "Hide" : "Show";
+  libraryVaultToggle.setAttribute("aria-pressed", String(hidden));
+  libraryVaultPass.focus();
+});
+libraryVaultPass.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void runLibraryVaultAction();
+  }
+});
+
 async function loadHistory(): Promise<void> {
+  syncLibraryLock();
+  if (!isVaultUnlocked()) {
+    savedMeetings = [];
+    dashboardCount.textContent = "0";
+    dashboardLatest.textContent = "Vault locked";
+    return;
+  }
   try {
     savedMeetings = await listMeetings();
     dashboardCount.textContent = String(savedMeetings.length);
@@ -2205,6 +2316,11 @@ function buildEmptyState(): HTMLElement {
     '<svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>';
   action.append("Start a meeting");
   action.addEventListener("click", () => {
+    if (!isVaultUnlocked()) {
+      syncLibraryLock();
+      libraryVaultPass.focus();
+      return;
+    }
     prepareTitle.value = meetingTitleInput.value || meetingTitle;
     setView("prepare");
   });
@@ -3848,6 +3964,7 @@ async function runVaultAction(): Promise<void> {
     syncRememberCheckbox();
     refreshVaultPanel();
     syncAiSettingsUi();
+    void loadHistory();
     /* The vault may now hold a Deepgram key that was not readable before. */
     syncAsrSettingsUi();
     allowCloudAudioWhenChosen();

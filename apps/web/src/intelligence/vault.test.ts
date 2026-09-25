@@ -7,10 +7,13 @@ import {
   isVaultUnlocked,
   lockVault,
   readVault,
+  openText,
+  sealText,
   unlockVault,
   unlockedEntries,
   updateVault,
   vaultExists,
+  VaultLockedError,
 } from "./vault";
 
 /** Minimal in-memory localStorage for the node test environment. */
@@ -125,6 +128,16 @@ describe("vault lifecycle", () => {
     expect(second.salt).not.toBe(first.salt);
     expect(second.iv).not.toBe(first.iv);
     expect(second.data).not.toBe(first.data);
+  });
+
+  it("seals an extra payload with the unlocked key and refuses it while locked", async () => {
+    await createVault({}, PASSPHRASE);
+    const sealed = await sealText("quarterly-planning-notes");
+    expect(sealed.data).not.toContain("quarterly-planning-notes");
+    expect(await openText(sealed)).toBe("quarterly-planning-notes");
+    lockVault();
+    await expect(sealText("another")).rejects.toBeInstanceOf(VaultLockedError);
+    await expect(openText(sealed)).rejects.toBeInstanceOf(VaultLockedError);
   });
 
   it("forgets everything on erase", async () => {

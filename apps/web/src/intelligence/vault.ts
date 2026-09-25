@@ -1,10 +1,12 @@
 /**
- * Passphrase-protected key vault.
+ * Passphrase-protected vault.
  *
- * The remembered API keys are sealed with AES-256-GCM under a key derived from
- * the user's passphrase with PBKDF2-HMAC-SHA256. Only the ciphertext, salt and
- * IV are persisted; the passphrase itself is never stored, so the vault can only
- * be opened by someone who knows it.
+ * Remembered API keys and saved meetings are sealed with AES-256-GCM under a
+ * key derived from the user's passphrase with PBKDF2-HMAC-SHA256. Only the
+ * ciphertext, salt and IV are persisted; the passphrase itself is never stored,
+ * so the vault can only be opened by someone who knows it. Keys live in
+ * localStorage. Meetings are too large for that, so their ciphertext lives in
+ * IndexedDB, encrypted with this same key.
  *
  * What this protects against: another person using this browser profile, a
  * synced or backed-up copy of localStorage, casual inspection in DevTools, and a
@@ -38,7 +40,25 @@ const SALT_BYTES = 16;
 const IV_BYTES = 12;
 export const MIN_PASSPHRASE_LENGTH = 8;
 
+export type SealedPayload = {
+  iv: string;
+  data: string;
+};
+
+/** Thrown when a meeting is read or written before the vault is unlocked. */
+export class VaultLockedError extends Error {
+  constructor() {
+    super("Unlock the vault before reading or saving meetings.");
+    this.name = "VaultLockedError";
+  }
+}
+
 let session: VaultSession | null = null;
+
+function requireSession(): VaultSession {
+  if (!session) throw new VaultLockedError();
+  return session;
+}
 
 export function encryptionAvailable(): boolean {
   return Boolean(
@@ -218,6 +238,72 @@ export async function unlockVault(
   }
   session = { key, salt: blob.salt, iterations: blob.iterations, entries };
   return { ...entries };
+}
+
+/**
+ * Seal an arbitrary payload with the unlocked vault key.
+ * A fresh IV is used every time, so two identical payloads do not match.
+ */
+export async function sealText(plaintext: string): Promise<SealedPayload> {
+  const current = requireSession();
+  const iv = crypto.getRandomValues(new Uint8Array(new ArrayBuffer(IV_BYTES)));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    current.key,
+    new TextEncoder().encode(plaintext),
+  );
+  return {
+    iv: toBase64(iv),
+    data: toBase64(new Uint8Array(ciphertext)),
+  };
+}
+
+/** Open a payload sealed by `sealText`. Throws when the vault is locked or the bytes were tampered with. */
+export async function openText(payload: SealedPayload): Promise<string> {
+  const current = requireSession();
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64(payload.iv) },
+      current.key,
+      fromBase64(payload.data),
+    );
+    return new TextDecoder().decode(plaintext);
+  } catch (error) {
+    if (error instanceof VaultLockedError) throw error;
+    throw new Error("The saved vault could not be read.");
+  }
+}
+
+/** Seal raw bytes (meeting audio) with the unlocked vault key. */
+export async function sealBytes(
+  plaintext: ArrayBuffer,
+): Promise<{ iv: string; ciphertext: ArrayBuffer }> {
+  const current = requireSession();
+  const iv = crypto.getRandomValues(new Uint8Array(new ArrayBuffer(IV_BYTES)));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    current.key,
+    plaintext,
+  );
+  return { iv: toBase64(iv), ciphertext };
+}
+
+/** Open bytes sealed by `sealBytes`. */
+export async function openBytes(
+  iv: string,
+  ciphertext: ArrayBuffer,
+): Promise<ArrayBuffer> {
+  const current = requireSession();
+  try {
+    return await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64(iv) },
+      current.key,
+      ciphertext,
+    );
+  } catch (error) {
+    if (error instanceof VaultLockedError) throw error;
+    throw new Error("The saved vault could not be read.");
+  }
 }
 
 /** Re-encrypt the unlocked vault after changing its contents. */
